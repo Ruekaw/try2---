@@ -1,15 +1,18 @@
 {
-  "total_seasons": 34,
-  "total_weeks_inferred": 261,
-  "converged_weeks": 261,
+  "total_seasons": 2,
+  "total_weeks_inferred": 11,
+  "converged_weeks": 11,
   "convergence_rate": 1.0,
-  "mean_ppc_consistency": 0.80096091954023,
-  "std_ppc_consistency": 0.17878302654334208,
-  "mean_acceptance_rate": 0.4625408684546616,
+  "mean_ppc_consistency": 0.9793939393939394,
+  "std_ppc_consistency": 0.04227897205964889,
+  "mean_acceptance_rate": 0.5761904761904763,
   "config": {
-    "n_samples": 5000,
-    "burn_in": 2000,
-    "thin": 2,
+    "n_samples": 300,
+    "burn_in": 120,
+    "thin": 1,
+    "use_method_specific_lambda": true,
+    "violation_lambda_percent": 50.0,
+    "violation_lambda_rank": 3.0,
     "violation_lambda": 50.0,
     "soft_elimination": true
   }

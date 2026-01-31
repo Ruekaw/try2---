@@ -13,17 +13,19 @@ MCM 2026 Problem C - Q1: MCMC粉丝投票反推模型
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 import json
 import warnings
+from datetime import datetime
 
 from config import (
     MCMCConfig, PathConfig, FilterConfig,
     get_combine_method, is_judge_save_season,
-    COMBINE_PERCENT, COMBINE_RANK
+    COMBINE_PERCENT, COMBINE_RANK,
+    get_violation_lambda
 )
 from sampler import UnifiedMCMCSampler, SamplingResult
 
@@ -45,8 +47,8 @@ class WeekResult:
     ci_lower: np.ndarray             # 95% CI 下界
     ci_upper: np.ndarray             # 95% CI 上界
     
-    # 确定性指标
-    certainty_index: np.ndarray      # λ = μ / (μ + σ)
+    # 确定性指标（信噪比）
+    snr: np.ndarray                  # SNR = μ / σ
     ci_width: np.ndarray             # Δ = Q97.5 - Q2.5
     
     # 一致性指标
@@ -78,6 +80,173 @@ class SeasonResult:
         if not self.week_results:
             return 0.0
         return np.mean([r.ppc_consistency for r in self.week_results.values()])
+
+
+# === 公共工具函数（去重，确保串行/并行一致）===
+
+def _prepare_week_inputs(
+    season: int,
+    week: int,
+    df: pd.DataFrame,
+    filter_config: FilterConfig
+) -> Optional[Tuple[pd.DataFrame, List[str], List[int], bool, Optional[List[int]]]]:
+    """
+    统一的“取本周数据 + 识别决赛/淘汰 + 跳过规则”逻辑。
+    返回 None 表示该周无需推断/数据不足。
+    """
+    if 'season' in df.columns:
+        week_df = df[(df['season'] == season) & (df['week'] == week)].copy()
+    else:
+        week_df = df[df['week'] == week].copy()
+
+    # 只保留本周参赛的选手
+    if filter_config.use_is_competing_week and 'is_competing_week' in week_df.columns:
+        week_df = week_df[week_df['is_competing_week'] == True].copy()
+    else:
+        week_df = week_df[week_df['week_total_score'].notna() & (week_df['week_total_score'] > 0)].copy()
+
+    if len(week_df) < 2:
+        return None
+
+    contestant_names = week_df['celebrity_name'].tolist()
+    name_to_idx = {n: i for i, n in enumerate(contestant_names)}
+
+    # 判断是否为决赛周
+    is_finale = False
+    placements = None
+
+    if 'is_final_week' in week_df.columns:
+        is_finale = week_df['is_final_week'].iloc[0] == True
+    elif 'final_week' in week_df.columns:
+        final_week = week_df['final_week'].iloc[0]
+        is_finale = (week == final_week)
+
+    if is_finale and 'placement' in week_df.columns:
+        placements = week_df['placement'].tolist()
+
+    # 确定被淘汰选手
+    eliminated_indices: List[int] = []
+    if not is_finale:
+        for _, row in week_df.iterrows():
+            last_week = row.get('last_week_scored', row.get('computed_last_week'))
+            result_type = row.get('result_type', '')
+
+            if last_week == week and result_type == 'eliminated':
+                nm = row['celebrity_name']
+                if nm in name_to_idx:
+                    eliminated_indices.append(name_to_idx[nm])
+
+    # 跳过无淘汰且非决赛的周
+    if (not is_finale) and len(eliminated_indices) == 0:
+        if 'is_no_elimination_any' in week_df.columns:
+            if week_df['is_no_elimination_any'].iloc[0]:
+                return None
+
+    return week_df, contestant_names, eliminated_indices, is_finale, placements
+
+
+def _infer_week_core(
+    season: int,
+    week: int,
+    week_df: pd.DataFrame,
+    contestant_names: List[str],
+    eliminated_indices: List[int],
+    is_finale: bool,
+    placements: Optional[List[int]],
+    mcmc_config: MCMCConfig
+) -> WeekResult:
+    """统一的单周推断核心（串行/并行共用）。"""
+    judge_scores = week_df['week_total_score'].values.astype(float)
+
+    combine_method = get_combine_method(season)
+    effective_lambda = get_violation_lambda(mcmc_config, combine_method)
+    week_config = replace(mcmc_config, violation_lambda=effective_lambda)
+
+    judge_save = is_judge_save_season(season) and mcmc_config.judge_save_enabled
+
+    sampler = UnifiedMCMCSampler(week_config)
+    result = sampler.sample(
+        judge_scores=judge_scores,
+        eliminated_indices=eliminated_indices,
+        combine_method=combine_method,
+        is_finale=is_finale,
+        placements=placements,
+        judge_save_enabled=judge_save
+    )
+
+    if not result.converged:
+        warnings.warn(f"Season {season} Week {week}: MCMC未收敛")
+
+    samples = result.samples
+    mean_votes = np.mean(samples, axis=0)
+    std_votes = np.std(samples, axis=0)
+    ci_lower = np.percentile(samples, 2.5, axis=0)
+    ci_upper = np.percentile(samples, 97.5, axis=0)
+
+    snr = mean_votes / (std_votes + 1e-10)
+    ci_width = ci_upper - ci_lower
+
+    if result.violation_history is not None:
+        ppc = float(np.mean(result.violation_history == 0))
+        mean_viol = float(np.mean(result.violation_history))
+    else:
+        ppc = 0.0
+        mean_viol = float('nan')
+
+    eliminated_names = [contestant_names[i] for i in eliminated_indices]
+
+    return WeekResult(
+        season=season,
+        week=week,
+        combine_method=combine_method,
+        is_finale=is_finale,
+        n_contestants=len(contestant_names),
+        contestant_names=contestant_names,
+        eliminated_names=eliminated_names,
+        mean_votes=mean_votes,
+        std_votes=std_votes,
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+        snr=snr,
+        ci_width=ci_width,
+        ppc_consistency=ppc,
+        mean_violation=mean_viol,
+        acceptance_rate=result.acceptance_rate,
+        converged=result.converged,
+        init_attempts=result.init_attempts
+    )
+
+
+def _infer_season_core(
+    season: int,
+    season_df: pd.DataFrame,
+    mcmc_config: MCMCConfig,
+    filter_config: FilterConfig
+) -> SeasonResult:
+    """统一的赛季推断核心（串行/并行共用）。"""
+    combine_method = get_combine_method(season)
+    season_result = SeasonResult(season=season, combine_method=combine_method)
+
+    weeks = sorted(season_df['week'].unique())
+    for week in weeks:
+        prepared = _prepare_week_inputs(season, week, season_df, filter_config)
+        if prepared is None:
+            continue
+        week_df, contestant_names, eliminated_indices, is_finale, placements = prepared
+        week_result = _infer_week_core(
+            season,
+            week,
+            week_df,
+            contestant_names,
+            eliminated_indices,
+            is_finale,
+            placements,
+            mcmc_config
+        )
+        if week_result is not None:
+            season_result.add_week(week, week_result)
+
+    return season_result
 
 
 class UnifiedFanVoteInferenceEngine:
@@ -131,68 +300,6 @@ class UnifiedFanVoteInferenceEngine:
         self.data = df
         return df
     
-    def _get_week_data(
-        self,
-        season: int,
-        week: int
-    ) -> Tuple[pd.DataFrame, List[str], List[int], bool, Optional[List[int]]]:
-        """
-        获取某赛季某周的数据
-        
-        Returns:
-            (周数据DataFrame, 选手名列表, 被淘汰索引, 是否决赛, 决赛名次列表)
-        """
-        df = self.data
-        
-        # 筛选本周数据
-        week_df = df[(df['season'] == season) & (df['week'] == week)].copy()
-        
-        # 只保留本周参赛的选手
-        if self.filter_config.use_is_competing_week and 'is_competing_week' in week_df.columns:
-            week_df = week_df[week_df['is_competing_week'] == True].copy()
-        else:
-            # 备用：根据分数判断
-            week_df = week_df[week_df['week_total_score'].notna() & (week_df['week_total_score'] > 0)].copy()
-        
-        if len(week_df) == 0:
-            return week_df, [], [], False, None
-        
-        # 选手名列表（保持顺序）
-        contestant_names = week_df['celebrity_name'].tolist()
-        
-        # 判断是否为决赛周
-        is_finale = False
-        placements = None
-        
-        if 'is_final_week' in week_df.columns:
-            is_finale = week_df['is_final_week'].iloc[0] == True
-        elif 'final_week' in week_df.columns and 'week' in week_df.columns:
-            final_week = week_df['final_week'].iloc[0]
-            is_finale = (week == final_week)
-        
-        if is_finale:
-            # 获取决赛选手的名次
-            placements = week_df['placement'].tolist()
-        
-        # 确定被淘汰选手
-        eliminated_indices = []
-        
-        if is_finale:
-            # 决赛周：不使用淘汰逻辑，而是用名次约束
-            eliminated_indices = []
-        else:
-            # 普通周：根据 result_type 或其他标记确定被淘汰者
-            # 被淘汰者是 last_week_scored == week 且 result_type == 'eliminated'
-            for i, row in week_df.iterrows():
-                last_week = row.get('last_week_scored', row.get('computed_last_week'))
-                result_type = row.get('result_type', '')
-                
-                if last_week == week and result_type == 'eliminated':
-                    idx = contestant_names.index(row['celebrity_name'])
-                    eliminated_indices.append(idx)
-        
-        return week_df, contestant_names, eliminated_indices, is_finale, placements
-    
     def _infer_week(
         self,
         season: int,
@@ -201,101 +308,27 @@ class UnifiedFanVoteInferenceEngine:
         """
         对单周执行 MCMC 推断
         """
-        week_df, contestant_names, eliminated_indices, is_finale, placements = \
-            self._get_week_data(season, week)
-        
-        if len(week_df) < 2:
+        prepared = _prepare_week_inputs(season, week, self.data, self.filter_config)
+        if prepared is None:
             return None
-        
-        # 跳过无淘汰且非决赛的周
-        if not is_finale and len(eliminated_indices) == 0:
-            # 检查是否为无淘汰周
-            if 'is_no_elimination_any' in week_df.columns:
-                if week_df['is_no_elimination_any'].iloc[0]:
-                    return None  # 无淘汰周，跳过
-        
-        # 获取评委总分
-        judge_scores = week_df['week_total_score'].values.astype(float)
-        
-        # 获取结合方法
-        combine_method = get_combine_method(season)
-        
-        # 检查是否启用评委救人
-        judge_save = is_judge_save_season(season) and self.mcmc_config.judge_save_enabled
-        
-        # 创建采样器并执行
-        sampler = UnifiedMCMCSampler(self.mcmc_config)
-        result = sampler.sample(
-            judge_scores=judge_scores,
-            eliminated_indices=eliminated_indices,
-            combine_method=combine_method,
-            is_finale=is_finale,
-            placements=placements,
-            judge_save_enabled=judge_save
-        )
-        
-        if not result.converged:
-            warnings.warn(f"Season {season} Week {week}: MCMC未收敛")
-        
-        # 计算后验统计
-        samples = result.samples
-        mean_votes = np.mean(samples, axis=0)
-        std_votes = np.std(samples, axis=0)
-        ci_lower = np.percentile(samples, 2.5, axis=0)
-        ci_upper = np.percentile(samples, 97.5, axis=0)
-        
-        # 确定性指标
-        certainty_index = mean_votes / (mean_votes + std_votes + 1e-10)
-        ci_width = ci_upper - ci_lower
-        
-        # 一致性指标
-        if result.violation_history is not None:
-            ppc = np.mean(result.violation_history == 0)
-            mean_viol = np.mean(result.violation_history)
-        else:
-            ppc = 0.0
-            mean_viol = np.nan
-        
-        eliminated_names = [contestant_names[i] for i in eliminated_indices]
-        
-        return WeekResult(
-            season=season,
-            week=week,
-            combine_method=combine_method,
-            is_finale=is_finale,
-            n_contestants=len(contestant_names),
-            contestant_names=contestant_names,
-            eliminated_names=eliminated_names,
-            mean_votes=mean_votes,
-            std_votes=std_votes,
-            ci_lower=ci_lower,
-            ci_upper=ci_upper,
-            certainty_index=certainty_index,
-            ci_width=ci_width,
-            ppc_consistency=ppc,
-            mean_violation=mean_viol,
-            acceptance_rate=result.acceptance_rate,
-            converged=result.converged,
-            init_attempts=result.init_attempts
+        week_df, contestant_names, eliminated_indices, is_finale, placements = prepared
+        return _infer_week_core(
+            season,
+            week,
+            week_df,
+            contestant_names,
+            eliminated_indices,
+            is_finale,
+            placements,
+            self.mcmc_config
         )
     
     def infer_season(self, season: int) -> SeasonResult:
         """
         对单赛季执行推断
         """
-        combine_method = get_combine_method(season)
-        season_result = SeasonResult(season=season, combine_method=combine_method)
-        
-        # 获取该赛季的所有周
         season_df = self.data[self.data['season'] == season]
-        weeks = sorted(season_df['week'].unique())
-        
-        for week in weeks:
-            week_result = self._infer_week(season, week)
-            if week_result is not None:
-                season_result.add_week(week, week_result)
-        
-        return season_result
+        return _infer_season_core(season, season_df, self.mcmc_config, self.filter_config)
     
     def infer_all(self, n_jobs: Optional[int] = None, use_parallel: bool = True) -> Dict[int, SeasonResult]:
         """
@@ -317,7 +350,8 @@ class UnifiedFanVoteInferenceEngine:
         # 确定并行进程数
         import os
         if n_jobs is None:
-            n_jobs = max(1, os.cpu_count() - 1)
+            cpu = os.cpu_count() or 1
+            n_jobs = max(1, cpu - 1)
         n_jobs = min(n_jobs, n_seasons)
         
         # 决定是否使用并行
@@ -393,7 +427,7 @@ class UnifiedFanVoteInferenceEngine:
                         'fan_vote_std': week_result.std_votes[i],
                         'fan_vote_ci_lower': week_result.ci_lower[i],
                         'fan_vote_ci_upper': week_result.ci_upper[i],
-                        'certainty_index': week_result.certainty_index[i],
+                        'snr': week_result.snr[i],
                         'ci_width': week_result.ci_width[i],
                         'ppc_consistency': week_result.ppc_consistency,
                         'mean_violation': week_result.mean_violation,
@@ -431,25 +465,45 @@ class UnifiedFanVoteInferenceEngine:
         导出所有结果
         """
         output_dir = self.path_config.get_output_dir()
+
+        def _fallback_path(path: Path) -> Path:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            return path.with_name(f"{path.stem}_{ts}{path.suffix}")
         
         # 长格式
         long_df = self.to_long_dataframe()
         long_path = output_dir / self.path_config.output_long
-        long_df.to_csv(long_path, index=False)
-        print(f"已导出长格式结果: {long_path}")
+        try:
+            long_df.to_csv(long_path, index=False)
+            print(f"已导出长格式结果: {long_path}")
+        except PermissionError:
+            alt = _fallback_path(long_path)
+            long_df.to_csv(alt, index=False)
+            warnings.warn(f"无法写入文件（可能被占用）: {long_path}，已改写到: {alt}")
         
         # 宽格式
         wide_df = self.to_wide_dataframe()
         wide_path = output_dir / self.path_config.output_wide
-        wide_df.to_csv(wide_path, index=False)
-        print(f"已导出宽格式结果: {wide_path}")
+        try:
+            wide_df.to_csv(wide_path, index=False)
+            print(f"已导出宽格式结果: {wide_path}")
+        except PermissionError:
+            alt = _fallback_path(wide_path)
+            wide_df.to_csv(alt, index=False)
+            warnings.warn(f"无法写入文件（可能被占用）: {wide_path}，已改写到: {alt}")
         
         # 汇总统计
         summary = self._compute_summary()
         summary_path = output_dir / self.path_config.output_summary
-        with open(summary_path, 'w', encoding='utf-8') as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
-        print(f"已导出汇总统计: {summary_path}")
+        try:
+            with open(summary_path, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            print(f"已导出汇总统计: {summary_path}")
+        except PermissionError:
+            alt = _fallback_path(summary_path)
+            with open(alt, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            warnings.warn(f"无法写入文件（可能被占用）: {summary_path}，已改写到: {alt}")
         
         return long_df, wide_df, summary
     
@@ -482,6 +536,9 @@ class UnifiedFanVoteInferenceEngine:
                 'n_samples': self.mcmc_config.n_samples,
                 'burn_in': self.mcmc_config.burn_in,
                 'thin': self.mcmc_config.thin,
+                'use_method_specific_lambda': self.mcmc_config.use_method_specific_lambda,
+                'violation_lambda_percent': self.mcmc_config.violation_lambda_percent,
+                'violation_lambda_rank': self.mcmc_config.violation_lambda_rank,
                 'violation_lambda': self.mcmc_config.violation_lambda,
                 'soft_elimination': self.mcmc_config.soft_elimination
             }
@@ -501,19 +558,7 @@ def _infer_season_standalone(
     
     这个函数必须是模块级别的（不能是类方法），才能被 pickle 序列化
     """
-    combine_method = get_combine_method(season)
-    season_result = SeasonResult(season=season, combine_method=combine_method)
-    
-    weeks = sorted(season_df['week'].unique())
-    
-    for week in weeks:
-        week_result = _infer_week_standalone(
-            season, week, season_df, mcmc_config, filter_config
-        )
-        if week_result is not None:
-            season_result.add_week(week, week_result)
-    
-    return season_result
+    return _infer_season_core(season, season_df, mcmc_config, filter_config)
 
 
 def _infer_week_standalone(
@@ -526,112 +571,19 @@ def _infer_week_standalone(
     """
     独立的单周推断函数（用于多进程）
     """
-    # 筛选本周数据
-    week_df = season_df[season_df['week'] == week].copy()
-    
-    # 只保留本周参赛的选手
-    if filter_config.use_is_competing_week and 'is_competing_week' in week_df.columns:
-        week_df = week_df[week_df['is_competing_week'] == True].copy()
-    else:
-        week_df = week_df[week_df['week_total_score'].notna() & (week_df['week_total_score'] > 0)].copy()
-    
-    if len(week_df) < 2:
+    prepared = _prepare_week_inputs(season, week, season_df, filter_config)
+    if prepared is None:
         return None
-    
-    # 选手名列表
-    contestant_names = week_df['celebrity_name'].tolist()
-    
-    # 判断是否为决赛周
-    is_finale = False
-    placements = None
-    
-    if 'is_final_week' in week_df.columns:
-        is_finale = week_df['is_final_week'].iloc[0] == True
-    elif 'final_week' in week_df.columns:
-        final_week = week_df['final_week'].iloc[0]
-        is_finale = (week == final_week)
-    
-    if is_finale:
-        placements = week_df['placement'].tolist()
-    
-    # 确定被淘汰选手
-    eliminated_indices = []
-    
-    if not is_finale:
-        for idx, row in week_df.iterrows():
-            last_week = row.get('last_week_scored', row.get('computed_last_week'))
-            result_type = row.get('result_type', '')
-            
-            if last_week == week and result_type == 'eliminated':
-                contestant_idx = contestant_names.index(row['celebrity_name'])
-                eliminated_indices.append(contestant_idx)
-    
-    # 跳过无淘汰且非决赛的周
-    if not is_finale and len(eliminated_indices) == 0:
-        if 'is_no_elimination_any' in week_df.columns:
-            if week_df['is_no_elimination_any'].iloc[0]:
-                return None
-    
-    # 获取评委总分
-    judge_scores = week_df['week_total_score'].values.astype(float)
-    
-    # 获取结合方法
-    combine_method = get_combine_method(season)
-    
-    # 检查是否启用评委救人
-    judge_save = is_judge_save_season(season) and mcmc_config.judge_save_enabled
-    
-    # 创建采样器并执行
-    sampler = UnifiedMCMCSampler(mcmc_config)
-    result = sampler.sample(
-        judge_scores=judge_scores,
-        eliminated_indices=eliminated_indices,
-        combine_method=combine_method,
-        is_finale=is_finale,
-        placements=placements,
-        judge_save_enabled=judge_save
-    )
-    
-    # 计算后验统计
-    samples = result.samples
-    mean_votes = np.mean(samples, axis=0)
-    std_votes = np.std(samples, axis=0)
-    ci_lower = np.percentile(samples, 2.5, axis=0)
-    ci_upper = np.percentile(samples, 97.5, axis=0)
-    
-    # 确定性指标
-    certainty_index = mean_votes / (mean_votes + std_votes + 1e-10)
-    ci_width = ci_upper - ci_lower
-    
-    # 一致性指标
-    if result.violation_history is not None:
-        ppc = np.mean(result.violation_history == 0)
-        mean_viol = np.mean(result.violation_history)
-    else:
-        ppc = 0.0
-        mean_viol = np.nan
-    
-    eliminated_names = [contestant_names[i] for i in eliminated_indices]
-    
-    return WeekResult(
-        season=season,
-        week=week,
-        combine_method=combine_method,
-        is_finale=is_finale,
-        n_contestants=len(contestant_names),
-        contestant_names=contestant_names,
-        eliminated_names=eliminated_names,
-        mean_votes=mean_votes,
-        std_votes=std_votes,
-        ci_lower=ci_lower,
-        ci_upper=ci_upper,
-        certainty_index=certainty_index,
-        ci_width=ci_width,
-        ppc_consistency=ppc,
-        mean_violation=mean_viol,
-        acceptance_rate=result.acceptance_rate,
-        converged=result.converged,
-        init_attempts=result.init_attempts
+    week_df, contestant_names, eliminated_indices, is_finale, placements = prepared
+    return _infer_week_core(
+        season,
+        week,
+        week_df,
+        contestant_names,
+        eliminated_indices,
+        is_finale,
+        placements,
+        mcmc_config
     )
 
 
