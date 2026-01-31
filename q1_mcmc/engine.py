@@ -297,26 +297,81 @@ class UnifiedFanVoteInferenceEngine:
         
         return season_result
     
-    def infer_all(self, n_jobs: Optional[int] = None) -> Dict[int, SeasonResult]:
+    def infer_all(self, n_jobs: Optional[int] = None, use_parallel: bool = True) -> Dict[int, SeasonResult]:
         """
-        对所有赛季执行推断
+        对所有赛季执行推断（支持并行）
         
         Args:
-            n_jobs: 并行作业数（暂时使用串行以保证稳定性）
+            n_jobs: 并行作业数，None 表示使用 CPU核心数-1，1 表示串行
+            use_parallel: 是否启用并行处理
+        
+        Returns:
+            Dict[season, SeasonResult]
         """
         if self.data is None:
             self.load_data()
         
         seasons = sorted(self.data['season'].unique())
+        n_seasons = len(seasons)
         
-        print(f"开始推断 {len(seasons)} 个赛季...")
+        # 确定并行进程数
+        import os
+        if n_jobs is None:
+            n_jobs = max(1, os.cpu_count() - 1)
+        n_jobs = min(n_jobs, n_seasons)
         
-        # 目前使用串行处理（MCMC 已经较快）
-        for season in tqdm(seasons, desc="赛季进度"):
-            season_result = self.infer_season(season)
-            self.results[season] = season_result
+        # 决定是否使用并行
+        if not use_parallel or n_jobs <= 1 or n_seasons <= 2:
+            # 串行模式
+            print(f"开始推断 {n_seasons} 个赛季（串行模式）...")
+            for season in tqdm(seasons, desc="赛季进度"):
+                season_result = self.infer_season(season)
+                self.results[season] = season_result
+        else:
+            # 并行模式
+            print(f"开始推断 {n_seasons} 个赛季（并行模式，{n_jobs} 进程）...")
+            self._infer_all_parallel(seasons, n_jobs)
         
         return self.results
+    
+    def _infer_all_parallel(self, seasons: List[int], n_jobs: int):
+        """
+        并行推断所有赛季
+        
+        使用 ProcessPoolExecutor 实现多进程并行
+        """
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        
+        # 准备各赛季需要的数据子集（避免传递整个 DataFrame）
+        season_data_dict = {}
+        for season in seasons:
+            season_df = self.data[self.data['season'] == season].copy()
+            season_data_dict[season] = season_df
+        
+        # 并行执行
+        with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+            # 提交所有任务
+            future_to_season = {
+                executor.submit(
+                    _infer_season_standalone,
+                    season,
+                    season_data_dict[season],
+                    self.mcmc_config,
+                    self.filter_config
+                ): season
+                for season in seasons
+            }
+            
+            # 收集结果（带进度条）
+            with tqdm(total=len(seasons), desc="赛季进度") as pbar:
+                for future in as_completed(future_to_season):
+                    season = future_to_season[future]
+                    try:
+                        season_result = future.result()
+                        self.results[season] = season_result
+                    except Exception as e:
+                        warnings.warn(f"Season {season} 推断失败: {e}")
+                    pbar.update(1)
     
     def to_long_dataframe(self) -> pd.DataFrame:
         """
@@ -433,6 +488,153 @@ class UnifiedFanVoteInferenceEngine:
         }
 
 
+# === 独立函数（用于多进程并行）===
+
+def _infer_season_standalone(
+    season: int,
+    season_df: pd.DataFrame,
+    mcmc_config: MCMCConfig,
+    filter_config: FilterConfig
+) -> SeasonResult:
+    """
+    独立的赛季推断函数（用于多进程）
+    
+    这个函数必须是模块级别的（不能是类方法），才能被 pickle 序列化
+    """
+    combine_method = get_combine_method(season)
+    season_result = SeasonResult(season=season, combine_method=combine_method)
+    
+    weeks = sorted(season_df['week'].unique())
+    
+    for week in weeks:
+        week_result = _infer_week_standalone(
+            season, week, season_df, mcmc_config, filter_config
+        )
+        if week_result is not None:
+            season_result.add_week(week, week_result)
+    
+    return season_result
+
+
+def _infer_week_standalone(
+    season: int,
+    week: int,
+    season_df: pd.DataFrame,
+    mcmc_config: MCMCConfig,
+    filter_config: FilterConfig
+) -> Optional[WeekResult]:
+    """
+    独立的单周推断函数（用于多进程）
+    """
+    # 筛选本周数据
+    week_df = season_df[season_df['week'] == week].copy()
+    
+    # 只保留本周参赛的选手
+    if filter_config.use_is_competing_week and 'is_competing_week' in week_df.columns:
+        week_df = week_df[week_df['is_competing_week'] == True].copy()
+    else:
+        week_df = week_df[week_df['week_total_score'].notna() & (week_df['week_total_score'] > 0)].copy()
+    
+    if len(week_df) < 2:
+        return None
+    
+    # 选手名列表
+    contestant_names = week_df['celebrity_name'].tolist()
+    
+    # 判断是否为决赛周
+    is_finale = False
+    placements = None
+    
+    if 'is_final_week' in week_df.columns:
+        is_finale = week_df['is_final_week'].iloc[0] == True
+    elif 'final_week' in week_df.columns:
+        final_week = week_df['final_week'].iloc[0]
+        is_finale = (week == final_week)
+    
+    if is_finale:
+        placements = week_df['placement'].tolist()
+    
+    # 确定被淘汰选手
+    eliminated_indices = []
+    
+    if not is_finale:
+        for idx, row in week_df.iterrows():
+            last_week = row.get('last_week_scored', row.get('computed_last_week'))
+            result_type = row.get('result_type', '')
+            
+            if last_week == week and result_type == 'eliminated':
+                contestant_idx = contestant_names.index(row['celebrity_name'])
+                eliminated_indices.append(contestant_idx)
+    
+    # 跳过无淘汰且非决赛的周
+    if not is_finale and len(eliminated_indices) == 0:
+        if 'is_no_elimination_any' in week_df.columns:
+            if week_df['is_no_elimination_any'].iloc[0]:
+                return None
+    
+    # 获取评委总分
+    judge_scores = week_df['week_total_score'].values.astype(float)
+    
+    # 获取结合方法
+    combine_method = get_combine_method(season)
+    
+    # 检查是否启用评委救人
+    judge_save = is_judge_save_season(season) and mcmc_config.judge_save_enabled
+    
+    # 创建采样器并执行
+    sampler = UnifiedMCMCSampler(mcmc_config)
+    result = sampler.sample(
+        judge_scores=judge_scores,
+        eliminated_indices=eliminated_indices,
+        combine_method=combine_method,
+        is_finale=is_finale,
+        placements=placements,
+        judge_save_enabled=judge_save
+    )
+    
+    # 计算后验统计
+    samples = result.samples
+    mean_votes = np.mean(samples, axis=0)
+    std_votes = np.std(samples, axis=0)
+    ci_lower = np.percentile(samples, 2.5, axis=0)
+    ci_upper = np.percentile(samples, 97.5, axis=0)
+    
+    # 确定性指标
+    certainty_index = mean_votes / (mean_votes + std_votes + 1e-10)
+    ci_width = ci_upper - ci_lower
+    
+    # 一致性指标
+    if result.violation_history is not None:
+        ppc = np.mean(result.violation_history == 0)
+        mean_viol = np.mean(result.violation_history)
+    else:
+        ppc = 0.0
+        mean_viol = np.nan
+    
+    eliminated_names = [contestant_names[i] for i in eliminated_indices]
+    
+    return WeekResult(
+        season=season,
+        week=week,
+        combine_method=combine_method,
+        is_finale=is_finale,
+        n_contestants=len(contestant_names),
+        contestant_names=contestant_names,
+        eliminated_names=eliminated_names,
+        mean_votes=mean_votes,
+        std_votes=std_votes,
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+        certainty_index=certainty_index,
+        ci_width=ci_width,
+        ppc_consistency=ppc,
+        mean_violation=mean_viol,
+        acceptance_rate=result.acceptance_rate,
+        converged=result.converged,
+        init_attempts=result.init_attempts
+    )
+
+
 def create_engine(
     mcmc_config: Optional[MCMCConfig] = None,
     path_config: Optional[PathConfig] = None,
@@ -483,3 +685,4 @@ if __name__ == "__main__":
         
     except FileNotFoundError as e:
         print(f"测试跳过: {e}")
+

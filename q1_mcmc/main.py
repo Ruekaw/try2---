@@ -105,8 +105,21 @@ def parse_args():
     parser.add_argument(
         "--exclude-seasons",
         type=str,
-        default="15",
-        help="排除的赛季，用逗号分隔，例如 15"
+        default="",
+        help="排除的赛季，用逗号分隔，例如 15（默认不排除）"
+    )
+    
+    # 并行参数
+    parser.add_argument(
+        "--n-jobs", "-j",
+        type=int,
+        default=None,
+        help="并行进程数，默认为 CPU核心数-1，设为1则串行"
+    )
+    parser.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="禁用并行，使用串行模式"
     )
     
     # 其他
@@ -180,6 +193,14 @@ def main():
         exclude_seasons=exclude_seasons
     )
     
+    # 并行配置
+    import os
+    n_jobs = args.n_jobs
+    use_parallel = not args.no_parallel
+    
+    if n_jobs is None:
+        n_jobs = max(1, os.cpu_count() - 1)
+    
     # === 打印配置 ===
     
     print("配置信息:")
@@ -196,6 +217,7 @@ def main():
     if exclude_seasons:
         print(f"  排除赛季: {exclude_seasons}")
     print(f"  随机种子: {mcmc_config.random_seed}")
+    print(f"  并行模式: {'启用' if use_parallel else '禁用'} ({n_jobs} 进程)")
     print()
     
     # === 创建引擎并运行 ===
@@ -209,7 +231,7 @@ def main():
     print()
     
     print("开始 MCMC 推断...")
-    engine.infer_all()
+    engine.infer_all(n_jobs=n_jobs, use_parallel=use_parallel)
     
     inference_time = time.time() - start_time
     print(f"\n推断完成，耗时: {inference_time:.1f} 秒")

@@ -2,31 +2,31 @@
 MCMC Fan Vote Inference - Diagnostic Report
 ============================================================
 
-Total records: 56
-Seasons: 2
-Weeks: 11
+Total records: 1805
+Seasons: 34
+Weeks: 261
 
 --- Convergence Summary ---
-Converged weeks: 11
+Converged weeks: 261
 Convergence rate: 100.00%
 
 --- PPC Consistency ---
-Mean: 1.000
-Std: 0.000
-Min: 1.000
+Mean: 0.779
+Std: 0.195
+Min: 0.279
 Max: 1.000
 
 --- Acceptance Rate ---
-Mean: 0.530
-Min: 0.287
-Max: 0.911
+Mean: 0.395
+Min: 0.092
+Max: 0.924
 
 --- Certainty Index ---
-Mean: 0.604
-Std: 0.060
+Mean: 0.564
+Std: 0.048
 
 --- 95% CI Width ---
-Mean: 0.4214
-Std: 0.2196
+Mean: 0.3873
+Std: 0.1601
 
 ============================================================
