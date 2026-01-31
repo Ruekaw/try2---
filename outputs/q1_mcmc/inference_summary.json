@@ -1,0 +1,16 @@
+{
+  "total_seasons": 2,
+  "total_weeks_inferred": 11,
+  "converged_weeks": 11,
+  "convergence_rate": 1.0,
+  "mean_ppc_consistency": 1.0,
+  "std_ppc_consistency": 0.0,
+  "mean_acceptance_rate": 0.6037662337662338,
+  "config": {
+    "n_samples": 500,
+    "burn_in": 200,
+    "thin": 1,
+    "violation_lambda": 50.0,
+    "soft_elimination": true
+  }
+}
