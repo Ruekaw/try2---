@@ -41,6 +41,7 @@ class WeekResult:
     n_contestants: int
     contestant_names: List[str]
     eliminated_names: List[str]
+    judge_scores: np.ndarray
     
     # 后验统计
     mean_votes: np.ndarray           # 后验均值
@@ -62,6 +63,9 @@ class WeekResult:
     acceptance_rate: float
     converged: bool
     init_attempts: int
+
+    # 原始样本（可选）
+    samples: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -190,7 +194,8 @@ def _infer_week_core(
     placements: Optional[List[int]],
     mcmc_config: MCMCConfig,
     prior_alpha_override: Optional[np.ndarray] = None,
-    survivor_indices_next: Optional[List[int]] = None
+    survivor_indices_next: Optional[List[int]] = None,
+    keep_samples: bool = False
 ) -> WeekResult:
     """统一的单周推断核心（串行/并行共用）。"""
     judge_scores = week_df['week_total_score'].values.astype(float)
@@ -255,6 +260,8 @@ def _infer_week_core(
         n_contestants=len(contestant_names),
         contestant_names=contestant_names,
         eliminated_names=eliminated_names,
+        judge_scores=judge_scores,
+        samples=samples if keep_samples else None,
         mean_votes=mean_votes,
         std_votes=std_votes,
         ci_lower=ci_lower,
@@ -275,11 +282,15 @@ def _infer_season_core(
     season: int,
     season_df: pd.DataFrame,
     mcmc_config: MCMCConfig,
-    filter_config: FilterConfig
+    filter_config: FilterConfig,
+    export_samples_dir: Optional[Path] = None,
+    keep_samples: bool = False
 ) -> SeasonResult:
     """统一的赛季推断核心（串行/并行共用）。"""
     combine_method = get_combine_method(season)
     season_result = SeasonResult(season=season, combine_method=combine_method)
+
+    export_payload: Dict[int, Dict[str, Any]] = {}
 
     weeks = sorted(season_df['week'].unique())
     prev_names: Optional[List[str]] = None
@@ -329,12 +340,35 @@ def _infer_season_core(
             placements,
             mcmc_config,
             prior_alpha_override=prior_override,
-            survivor_indices_next=survivor_indices_next
+            survivor_indices_next=survivor_indices_next,
+            keep_samples=keep_samples or export_samples_dir is not None
         )
         if week_result is not None:
             season_result.add_week(week, week_result)
             prev_names = week_result.contestant_names
             prev_mean_votes = week_result.mean_votes
+
+            if export_samples_dir is not None and week_result.samples is not None:
+                export_payload[week] = {
+                    'samples': week_result.samples,
+                    'contestant_names': week_result.contestant_names,
+                    'eliminated_names': week_result.eliminated_names,
+                    'is_finale': week_result.is_finale,
+                    'placements': placements if placements is not None else [],
+                    'combine_method': week_result.combine_method,
+                    'judge_scores': week_result.judge_scores
+                }
+                if not keep_samples:
+                    week_result.samples = None
+
+    if export_samples_dir is not None and export_payload:
+        _export_season_samples_npz(
+            season=season,
+            combine_method=combine_method,
+            export_dir=export_samples_dir,
+            mcmc_config=mcmc_config,
+            payload=export_payload
+        )
 
     return season_result
 
@@ -440,7 +474,13 @@ class UnifiedFanVoteInferenceEngine:
         season_df = self.data[self.data['season'] == season]
         return _infer_season_core(season, season_df, self.mcmc_config, self.filter_config)
     
-    def infer_all(self, n_jobs: Optional[int] = None, use_parallel: bool = True) -> Dict[int, SeasonResult]:
+    def infer_all(
+        self,
+        n_jobs: Optional[int] = None,
+        use_parallel: bool = True,
+        export_samples_dir: Optional[Path] = None,
+        keep_samples: bool = False
+    ) -> Dict[int, SeasonResult]:
         """
         对所有赛季执行推断（支持并行）
         
@@ -465,20 +505,37 @@ class UnifiedFanVoteInferenceEngine:
         n_jobs = min(n_jobs, n_seasons)
         
         # 决定是否使用并行
+        if export_samples_dir is not None and not isinstance(export_samples_dir, Path):
+            export_samples_dir = Path(export_samples_dir)
+
         if not use_parallel or n_jobs <= 1 or n_seasons <= 2:
             # 串行模式
             print(f"开始推断 {n_seasons} 个赛季（串行模式）...")
             for season in tqdm(seasons, desc="赛季进度"):
-                season_result = self.infer_season(season)
+                season_df = self.data[self.data['season'] == season]
+                season_result = _infer_season_core(
+                    season,
+                    season_df,
+                    self.mcmc_config,
+                    self.filter_config,
+                    export_samples_dir=export_samples_dir,
+                    keep_samples=keep_samples
+                )
                 self.results[season] = season_result
         else:
             # 并行模式
             print(f"开始推断 {n_seasons} 个赛季（并行模式，{n_jobs} 进程）...")
-            self._infer_all_parallel(seasons, n_jobs)
+            self._infer_all_parallel(seasons, n_jobs, export_samples_dir, keep_samples)
         
         return self.results
     
-    def _infer_all_parallel(self, seasons: List[int], n_jobs: int):
+    def _infer_all_parallel(
+        self,
+        seasons: List[int],
+        n_jobs: int,
+        export_samples_dir: Optional[Path] = None,
+        keep_samples: bool = False
+    ):
         """
         并行推断所有赛季
         
@@ -501,7 +558,9 @@ class UnifiedFanVoteInferenceEngine:
                     season,
                     season_data_dict[season],
                     self.mcmc_config,
-                    self.filter_config
+                    self.filter_config,
+                    export_samples_dir,
+                    keep_samples
                 ): season
                 for season in seasons
             }
@@ -618,6 +677,39 @@ class UnifiedFanVoteInferenceEngine:
             warnings.warn(f"无法写入文件（可能被占用）: {summary_path}，已改写到: {alt}")
         
         return long_df, wide_df, summary
+
+    def export_samples_npz(self, export_dir: Optional[Path] = None):
+        """
+        将当前内存中的样本导出为按赛季的 .npz 文件
+        仅当 WeekResult.samples 已保留时有效
+        """
+        if export_dir is None:
+            export_dir = self.path_config.get_output_dir()
+        if not isinstance(export_dir, Path):
+            export_dir = Path(export_dir)
+
+        for season, season_result in self.results.items():
+            payload: Dict[int, Dict[str, Any]] = {}
+            for week, week_result in season_result.week_results.items():
+                if week_result.samples is None:
+                    continue
+                payload[week] = {
+                    'samples': week_result.samples,
+                    'contestant_names': week_result.contestant_names,
+                    'eliminated_names': week_result.eliminated_names,
+                    'is_finale': week_result.is_finale,
+                    'placements': [],
+                    'combine_method': week_result.combine_method,
+                    'judge_scores': week_result.judge_scores
+                }
+            if payload:
+                _export_season_samples_npz(
+                    season=season,
+                    combine_method=season_result.combine_method,
+                    export_dir=export_dir,
+                    mcmc_config=self.mcmc_config,
+                    payload=payload
+                )
     
     def _compute_summary(self) -> Dict[str, Any]:
         """
@@ -666,14 +758,23 @@ def _infer_season_standalone(
     season: int,
     season_df: pd.DataFrame,
     mcmc_config: MCMCConfig,
-    filter_config: FilterConfig
+    filter_config: FilterConfig,
+    export_samples_dir: Optional[Path] = None,
+    keep_samples: bool = False
 ) -> SeasonResult:
     """
     独立的赛季推断函数（用于多进程）
     
     这个函数必须是模块级别的（不能是类方法），才能被 pickle 序列化
     """
-    return _infer_season_core(season, season_df, mcmc_config, filter_config)
+    return _infer_season_core(
+        season,
+        season_df,
+        mcmc_config,
+        filter_config,
+        export_samples_dir=export_samples_dir,
+        keep_samples=keep_samples
+    )
 
 
 def _infer_week_standalone(
@@ -719,6 +820,60 @@ def _infer_week_standalone(
         mcmc_config,
         survivor_indices_next=survivor_indices_next
     )
+
+
+def _export_season_samples_npz(
+    season: int,
+    combine_method: str,
+    export_dir: Path,
+    mcmc_config: MCMCConfig,
+    payload: Dict[int, Dict[str, Any]]
+):
+    """
+    将单赛季样本导出为 .npz
+    payload: week -> {samples, contestant_names, eliminated_names, is_finale, placements, combine_method, judge_scores}
+    """
+    export_dir.mkdir(parents=True, exist_ok=True)
+    out_path = export_dir / f"season_{season}_samples.npz"
+
+    weeks = sorted(payload.keys())
+    data: Dict[str, Any] = {
+        'weeks': np.array(weeks, dtype=int)
+    }
+
+    for wk in weeks:
+        wk_payload = payload[wk]
+        data[f"week_{wk}_samples"] = wk_payload['samples']
+        data[f"week_{wk}_contestants"] = np.array(wk_payload['contestant_names'], dtype=object)
+        data[f"week_{wk}_eliminated"] = np.array(wk_payload['eliminated_names'], dtype=object)
+        data[f"week_{wk}_is_finale"] = np.array(wk_payload['is_finale'], dtype=bool)
+        data[f"week_{wk}_placements"] = np.array(wk_payload['placements'], dtype=object)
+        data[f"week_{wk}_combine_method"] = np.array(wk_payload['combine_method'], dtype=object)
+        data[f"week_{wk}_judge_scores"] = np.array(wk_payload['judge_scores'], dtype=float)
+
+    meta = {
+        'season': int(season),
+        'combine_method': str(combine_method),
+        'export_time': datetime.now().isoformat(timespec='seconds'),
+        'mcmc_config': {
+            'n_samples': int(mcmc_config.n_samples),
+            'burn_in': int(mcmc_config.burn_in),
+            'thin': int(mcmc_config.thin),
+            'proposal_scale': float(mcmc_config.proposal_scale),
+            'prior_alpha': float(mcmc_config.prior_alpha),
+            'soft_elimination': bool(mcmc_config.soft_elimination),
+            'violation_lambda_percent': float(mcmc_config.violation_lambda_percent),
+            'violation_lambda_rank': float(mcmc_config.violation_lambda_rank),
+            'judge_save_enabled': bool(mcmc_config.judge_save_enabled),
+            'judge_save_bottom_k': int(mcmc_config.judge_save_bottom_k),
+            'temporal_smoothing_enabled': bool(mcmc_config.temporal_smoothing_enabled),
+            'temporal_alpha': float(mcmc_config.temporal_alpha),
+            'temporal_beta': float(mcmc_config.temporal_beta)
+        }
+    }
+    data['meta'] = np.array(json.dumps(meta, ensure_ascii=False), dtype=object)
+
+    np.savez_compressed(out_path, **data)
 
 
 def create_engine(

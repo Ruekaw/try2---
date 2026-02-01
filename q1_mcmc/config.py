@@ -16,8 +16,8 @@ class MCMCConfig:
     """MCMC采样配置参数"""
     
     # === 采样参数 ===
-    n_samples: int = 5000          # 保留的有效样本数
-    burn_in: int = 2000            # 预热期样本数（将丢弃）
+    n_samples: int = 10000          # 保留的有效样本数
+    burn_in: int = 5000            # 预热期样本数（将丢弃）
     thin: int = 2                  # 稀疏采样间隔
     
     # === 提议分布参数 ===

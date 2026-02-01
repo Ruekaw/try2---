@@ -1,0 +1,1 @@
+"""Q2 counterfactual simulation package."""
