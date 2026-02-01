@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import warnings
 
+from scoring import compute_total_scores
+
 # 可选导入 matplotlib（用于可视化）
 try:
     import matplotlib.pyplot as plt
@@ -35,6 +37,81 @@ class DiagnosticResult:
     autocorr_time: np.ndarray        # 自相关时间
     rhat: Optional[np.ndarray]       # R-hat（多链时）
     acceptance_rate: float
+
+
+def _get_bottom_candidates_with_ties(
+    total_scores: np.ndarray,
+    k: int,
+    combine_method: str,
+    tie_tolerance: float = 1e-9
+) -> List[int]:
+    """在考虑并列的情况下，返回 bottom-k 候选集合。"""
+    n = len(total_scores)
+    if n == 0 or k <= 0:
+        return []
+
+    if combine_method == 'percent':
+        order = np.argsort(total_scores)
+        threshold_idx = min(k - 1, n - 1)
+        threshold = total_scores[order[threshold_idx]]
+        mask = total_scores <= (threshold + tie_tolerance)
+    else:
+        order = np.argsort(-total_scores)
+        threshold_idx = min(k - 1, n - 1)
+        threshold = total_scores[order[threshold_idx]]
+        mask = total_scores >= (threshold - tie_tolerance)
+
+    return [i for i, flag in enumerate(mask) if flag]
+
+
+def compute_hit_rate_for_week(
+    fan_vote_mean: np.ndarray,
+    judge_scores: np.ndarray,
+    eliminated_indices: List[int],
+    combine_method: str,
+    judge_save_enabled: bool = False,
+    judge_save_bottom_k: int = 2,
+    tie_tolerance: float = 1e-9
+) -> float:
+    """
+    计算单周 Hit Rate 指标。
+
+    Returns:
+        Hit Rate ∈ [0, 1]；若无淘汰则返回 NaN。
+    """
+    k = len(eliminated_indices)
+    if k == 0:
+        return float('nan')
+
+    total_scores = compute_total_scores(fan_vote_mean, judge_scores, combine_method)
+    if judge_save_enabled and k == 1:
+        eval_k = max(judge_save_bottom_k, 1)
+    else:
+        eval_k = k
+
+    predicted_bottom = set(
+        _get_bottom_candidates_with_ties(total_scores, eval_k, combine_method, tie_tolerance)
+    )
+    hits = sum(1 for idx in eliminated_indices if idx in predicted_bottom)
+    return hits / k
+
+
+def summarize_hit_rates(results_df: pd.DataFrame) -> Dict[str, float]:
+    """汇总长表中的 Hit Rate（按周去重）。"""
+    if 'hit_rate' not in results_df.columns:
+        return {'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0, 'count': 0}
+
+    weekly = results_df.groupby(['season', 'week'])['hit_rate'].first().dropna()
+    if weekly.empty:
+        return {'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0, 'count': 0}
+
+    return {
+        'mean': float(weekly.mean()),
+        'std': float(weekly.std() if len(weekly) > 1 else 0.0),
+        'min': float(weekly.min()),
+        'max': float(weekly.max()),
+        'count': int(len(weekly))
+    }
 
 
 def compute_autocorrelation(x: np.ndarray, max_lag: int = None) -> np.ndarray:
@@ -407,6 +484,8 @@ def generate_diagnostic_report(
     Returns:
         报告文本
     """
+    hit_summary = summarize_hit_rates(results_df)
+
     report_lines = [
         "=" * 60,
         "MCMC Fan Vote Inference - Diagnostic Report",
@@ -430,6 +509,13 @@ def generate_diagnostic_report(
         f"Mean: {results_df['acceptance_rate'].mean():.3f}",
         f"Min: {results_df['acceptance_rate'].min():.3f}",
         f"Max: {results_df['acceptance_rate'].max():.3f}",
+        "",
+        "--- Hit Rate ---",
+        f"Mean: {hit_summary['mean']:.3f}",
+        f"Std: {hit_summary['std']:.3f}",
+        f"Min: {hit_summary['min']:.3f}",
+        f"Max: {hit_summary['max']:.3f}",
+        f"Weeks counted: {hit_summary['count']}",
         "",
         "--- Signal-to-Noise Ratio (SNR = μ/σ) ---",
         f"Mean: {results_df['snr'].mean():.3f}" if 'snr' in results_df.columns else f"Mean: {results_df['certainty_index'].mean():.3f}",

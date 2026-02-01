@@ -98,6 +98,7 @@ class UnifiedMCMCSampler:
         is_finale: bool = False,
         placements: Optional[List[int]] = None,
         judge_save_enabled: bool = False,
+        survivor_indices: Optional[List[int]] = None,
         prior_alpha_override: Optional[np.ndarray] = None,
         violation_lambda: Optional[float] = None
     ) -> Tuple[float, float]:
@@ -113,9 +114,15 @@ class UnifiedMCMCSampler:
         log_prior = self._log_prior(v, prior_alpha_override)
         
         violation = compute_total_violation(
-            v, judge_scores, eliminated_indices, combine_method,
-            is_finale, placements, judge_save_enabled,
-            self.config.judge_save_bottom_k
+            v,
+            judge_scores,
+            eliminated_indices,
+            combine_method,
+            is_finale,
+            placements,
+            judge_save_enabled,
+            self.config.judge_save_bottom_k,
+            survivor_indices,
         )
         
         if self.config.soft_elimination:
@@ -140,7 +147,8 @@ class UnifiedMCMCSampler:
         combine_method: str,
         is_finale: bool = False,
         placements: Optional[List[int]] = None,
-        judge_save_enabled: bool = False
+        judge_save_enabled: bool = False,
+        survivor_indices: Optional[List[int]] = None
     ) -> Tuple[Optional[np.ndarray], int]:
         """
         寻找满足约束的初始状态
@@ -164,9 +172,15 @@ class UnifiedMCMCSampler:
             else:
                 # 软约束：接受任何初始状态，但优先选择低违约的
                 violation = compute_total_violation(
-                    v, judge_scores, eliminated_indices, combine_method,
-                    is_finale, placements, judge_save_enabled,
-                    self.config.judge_save_bottom_k
+                    v,
+                    judge_scores,
+                    eliminated_indices,
+                    combine_method,
+                    is_finale,
+                    placements,
+                    judge_save_enabled,
+                    self.config.judge_save_bottom_k,
+                    survivor_indices,
                 )
                 # 前 1000 次尝试寻找零违约，之后接受任意
                 if violation == 0 or attempt >= 1000:
@@ -187,6 +201,7 @@ class UnifiedMCMCSampler:
         is_finale: bool = False,
         placements: Optional[List[int]] = None,
         judge_save_enabled: bool = False,
+        survivor_indices: Optional[List[int]] = None,
         prior_alpha_override: Optional[np.ndarray] = None,
         violation_lambda_override: Optional[float] = None
     ) -> SamplingResult:
@@ -212,7 +227,7 @@ class UnifiedMCMCSampler:
         # 寻找初始状态
         current, init_attempts = self._find_valid_initial(
             n_contestants, judge_scores, eliminated_indices, combine_method,
-            is_finale, placements, judge_save_enabled
+            is_finale, placements, judge_save_enabled, survivor_indices
         )
         
         if current is None:
@@ -228,8 +243,8 @@ class UnifiedMCMCSampler:
         # 计算当前状态的后验
         current_log_post, current_violation = self._log_posterior(
             current, judge_scores, eliminated_indices, combine_method,
-            is_finale, placements, judge_save_enabled, prior_alpha_override,
-            violation_lambda_override
+            is_finale, placements, judge_save_enabled, survivor_indices,
+            prior_alpha_override, violation_lambda_override
         )
         
         # 存储样本和诊断信息
@@ -244,8 +259,8 @@ class UnifiedMCMCSampler:
             # 计算提议状态的后验
             proposed_log_post, proposed_violation = self._log_posterior(
                 proposed, judge_scores, eliminated_indices, combine_method,
-                is_finale, placements, judge_save_enabled, prior_alpha_override,
-                violation_lambda_override
+                is_finale, placements, judge_save_enabled, survivor_indices,
+                prior_alpha_override, violation_lambda_override
             )
             
             # 计算 M-H 接受比

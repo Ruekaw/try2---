@@ -300,6 +300,7 @@ def main():
     print(f"推断周数: {sum(sr.n_weeks for sr in engine.results.values())}")
     print(f"平均 PPC 一致性: {summary['mean_ppc_consistency']:.3f}")
     print(f"平均接受率: {summary['mean_acceptance_rate']:.3f}")
+    print(f"平均 Hit Rate: {summary['mean_hit_rate']:.3f}")
     print()
     print("输出文件:")
     print(f"  - {path_config.get_output_dir() / path_config.output_long}")

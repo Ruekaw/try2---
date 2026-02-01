@@ -31,7 +31,7 @@ class MCMCConfig:
 
     # === 时间平滑（跨周先验）===
     temporal_smoothing_enabled: bool = True  # 是否启用“上周后验作为本周先验”
-    temporal_alpha: float = 40.0              # 惯性系数 α（越大越粘）
+    temporal_alpha: float = 10.0              # 惯性系数 α（越大越粘）
     temporal_beta: float = 1.0                # 平滑项 β（避免零先验）
     
     # === 约束参数 ===

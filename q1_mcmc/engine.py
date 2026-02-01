@@ -28,6 +28,7 @@ from config import (
     get_violation_lambda
 )
 from sampler import UnifiedMCMCSampler, SamplingResult
+from diagnostics import compute_hit_rate_for_week
 
 
 @dataclass
@@ -54,6 +55,8 @@ class WeekResult:
     # 一致性指标
     ppc_consistency: float           # PPC 一致性
     mean_violation: float            # 平均违约
+    hit_rate: float                  # Hit Rate 命中率
+    elimination_count: int           # 实际淘汰人数
     
     # 诊断
     acceptance_rate: float
@@ -186,7 +189,8 @@ def _infer_week_core(
     is_finale: bool,
     placements: Optional[List[int]],
     mcmc_config: MCMCConfig,
-    prior_alpha_override: Optional[np.ndarray] = None
+    prior_alpha_override: Optional[np.ndarray] = None,
+    survivor_indices_next: Optional[List[int]] = None
 ) -> WeekResult:
     """统一的单周推断核心（串行/并行共用）。"""
     judge_scores = week_df['week_total_score'].values.astype(float)
@@ -204,6 +208,7 @@ def _infer_week_core(
         is_finale=is_finale,
         placements=placements,
         judge_save_enabled=judge_save,
+        survivor_indices=survivor_indices_next,
         prior_alpha_override=prior_alpha_override,
         violation_lambda_override=effective_lambda
     )
@@ -228,6 +233,19 @@ def _infer_week_core(
         mean_viol = float('nan')
 
     eliminated_names = [contestant_names[i] for i in eliminated_indices]
+    elimination_count = len(eliminated_indices)
+
+    if is_finale or elimination_count == 0:
+        hit_rate = float('nan')
+    else:
+        hit_rate = compute_hit_rate_for_week(
+            mean_votes,
+            judge_scores,
+            eliminated_indices,
+            combine_method,
+            judge_save_enabled=judge_save,
+            judge_save_bottom_k=mcmc_config.judge_save_bottom_k
+        )
 
     return WeekResult(
         season=season,
@@ -245,6 +263,8 @@ def _infer_week_core(
         ci_width=ci_width,
         ppc_consistency=ppc,
         mean_violation=mean_viol,
+        hit_rate=hit_rate,
+        elimination_count=elimination_count,
         acceptance_rate=result.acceptance_rate,
         converged=result.converged,
         init_attempts=result.init_attempts
@@ -270,6 +290,25 @@ def _infer_season_core(
             continue
         week_df, contestant_names, eliminated_indices, is_finale, placements = prepared
 
+        # 计算本周之后仍在场的选手索引，作为“可能被救的人”（评委救人约束用）
+        survivor_indices_next: Optional[List[int]] = None
+        if not is_finale and len(eliminated_indices) > 0:
+            name_to_idx = {n: i for i, n in enumerate(contestant_names)}
+
+            future_df = season_df[season_df['week'] > week].copy()
+            if filter_config.use_is_competing_week and 'is_competing_week' in future_df.columns:
+                future_df = future_df[future_df['is_competing_week'] == True].copy()
+            else:
+                future_df = future_df[future_df['week_total_score'].notna() & (future_df['week_total_score'] > 0)].copy()
+
+            if len(future_df) > 0:
+                survivor_names = set(future_df['celebrity_name'].tolist())
+                survivor_indices_next = [
+                    name_to_idx[nm]
+                    for nm in contestant_names
+                    if nm in survivor_names
+                ] or None
+
         prior_override = None
         if mcmc_config.temporal_smoothing_enabled and prev_mean_votes is not None:
             prior_override = _build_temporal_prior(
@@ -289,7 +328,8 @@ def _infer_season_core(
             is_finale,
             placements,
             mcmc_config,
-            prior_alpha_override=prior_override
+            prior_alpha_override=prior_override,
+            survivor_indices_next=survivor_indices_next
         )
         if week_result is not None:
             season_result.add_week(week, week_result)
@@ -358,10 +398,29 @@ class UnifiedFanVoteInferenceEngine:
         """
         对单周执行 MCMC 推断
         """
-        prepared = _prepare_week_inputs(season, week, self.data, self.filter_config)
+        season_df = self.data[self.data['season'] == season]
+        prepared = _prepare_week_inputs(season, week, season_df, self.filter_config)
         if prepared is None:
             return None
         week_df, contestant_names, eliminated_indices, is_finale, placements = prepared
+        
+        survivor_indices_next: Optional[List[int]] = None
+        if not is_finale and len(eliminated_indices) > 0:
+            name_to_idx = {n: i for i, n in enumerate(contestant_names)}
+
+            future_df = season_df[season_df['week'] > week].copy()
+            if self.filter_config.use_is_competing_week and 'is_competing_week' in future_df.columns:
+                future_df = future_df[future_df['is_competing_week'] == True].copy()
+            else:
+                future_df = future_df[future_df['week_total_score'].notna() & (future_df['week_total_score'] > 0)].copy()
+
+            if len(future_df) > 0:
+                survivor_names = set(future_df['celebrity_name'].tolist())
+                survivor_indices_next = [
+                    name_to_idx[nm]
+                    for nm in contestant_names
+                    if nm in survivor_names
+                ] or None
         return _infer_week_core(
             season,
             week,
@@ -370,7 +429,8 @@ class UnifiedFanVoteInferenceEngine:
             eliminated_indices,
             is_finale,
             placements,
-            self.mcmc_config
+            self.mcmc_config,
+            survivor_indices_next=survivor_indices_next
         )
     
     def infer_season(self, season: int) -> SeasonResult:
@@ -480,6 +540,8 @@ class UnifiedFanVoteInferenceEngine:
                         'snr': week_result.snr[i],
                         'ci_width': week_result.ci_width[i],
                         'ppc_consistency': week_result.ppc_consistency,
+                        'hit_rate': week_result.hit_rate,
+                        'elimination_count': week_result.elimination_count,
                         'mean_violation': week_result.mean_violation,
                         'acceptance_rate': week_result.acceptance_rate,
                         'converged': week_result.converged
@@ -561,11 +623,12 @@ class UnifiedFanVoteInferenceEngine:
         """
         计算汇总统计
         """
-        all_ppc = []
-        all_acceptance = []
+        all_ppc: List[float] = []
+        all_acceptance: List[float] = []
+        all_hit_rates: List[float] = []
         total_weeks = 0
         converged_weeks = 0
-        
+
         for season_result in self.results.values():
             for week_result in season_result.week_results.values():
                 all_ppc.append(week_result.ppc_consistency)
@@ -573,7 +636,9 @@ class UnifiedFanVoteInferenceEngine:
                 total_weeks += 1
                 if week_result.converged:
                     converged_weeks += 1
-        
+                if not np.isnan(week_result.hit_rate):
+                    all_hit_rates.append(week_result.hit_rate)
+
         return {
             'total_seasons': len(self.results),
             'total_weeks_inferred': total_weeks,
@@ -582,6 +647,8 @@ class UnifiedFanVoteInferenceEngine:
             'mean_ppc_consistency': float(np.mean(all_ppc)) if all_ppc else 0.0,
             'std_ppc_consistency': float(np.std(all_ppc)) if all_ppc else 0.0,
             'mean_acceptance_rate': float(np.mean(all_acceptance)) if all_acceptance else 0.0,
+            'mean_hit_rate': float(np.mean(all_hit_rates)) if all_hit_rates else 0.0,
+            'std_hit_rate': float(np.std(all_hit_rates)) if all_hit_rates else 0.0,
             'config': {
                 'n_samples': self.mcmc_config.n_samples,
                 'burn_in': self.mcmc_config.burn_in,
@@ -623,6 +690,24 @@ def _infer_week_standalone(
     if prepared is None:
         return None
     week_df, contestant_names, eliminated_indices, is_finale, placements = prepared
+
+    survivor_indices_next: Optional[List[int]] = None
+    if not is_finale and len(eliminated_indices) > 0:
+        name_to_idx = {n: i for i, n in enumerate(contestant_names)}
+
+        future_df = season_df[season_df['week'] > week].copy()
+        if filter_config.use_is_competing_week and 'is_competing_week' in future_df.columns:
+            future_df = future_df[future_df['is_competing_week'] == True].copy()
+        else:
+            future_df = future_df[future_df['week_total_score'].notna() & (future_df['week_total_score'] > 0)].copy()
+
+        if len(future_df) > 0:
+            survivor_names = set(future_df['celebrity_name'].tolist())
+            survivor_indices_next = [
+                name_to_idx[nm]
+                for nm in contestant_names
+                if nm in survivor_names
+            ] or None
     return _infer_week_core(
         season,
         week,
@@ -631,7 +716,8 @@ def _infer_week_standalone(
         eliminated_indices,
         is_finale,
         placements,
-        mcmc_config
+        mcmc_config,
+        survivor_indices_next=survivor_indices_next
     )
 
 

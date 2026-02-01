@@ -2,31 +2,38 @@
 MCMC Fan Vote Inference - Diagnostic Report
 ============================================================
 
-Total records: 56
-Seasons: 2
-Weeks: 11
+Total records: 84
+Seasons: 1
+Weeks: 10
 
 --- Convergence Summary ---
-Converged weeks: 11
+Converged weeks: 10
 Convergence rate: 100.00%
 
 --- PPC Consistency ---
-Mean: 0.974
-Std: 0.046
-Min: 0.883
+Mean: 0.971
+Std: 0.034
+Min: 0.851
 Max: 1.000
 
 --- Acceptance Rate ---
-Mean: 0.497
-Min: 0.260
-Max: 0.917
+Mean: 0.206
+Min: 0.043
+Max: 0.463
+
+--- Hit Rate ---
+Mean: 0.889
+Std: 0.333
+Min: 0.000
+Max: 1.000
+Weeks counted: 9
 
 --- Signal-to-Noise Ratio (SNR = μ/σ) ---
-Mean: 1.783
-Std: 1.028
+Mean: 2.821
+Std: 1.403
 
 --- 95% CI Width ---
-Mean: 0.3642
-Std: 0.2031
+Mean: 0.1522
+Std: 0.0546
 
 ============================================================
