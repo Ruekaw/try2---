@@ -154,6 +154,17 @@ def load_q2_data(clean_csv: Path, npz_dir: Path) -> LoadResult:
                 continue
             weeks = [int(w) for w in weeks.tolist()]
 
+            csv_weeks = sorted({int(w) for w in season_df[week_col].dropna().unique().tolist()})
+            for wk in csv_weeks:
+                if wk not in weeks:
+                    skipped_weeks.append(
+                        {
+                            "season": season,
+                            "week": wk,
+                            "reason": "missing in npz (not exported by Q1)",
+                        }
+                    )
+
             for wk in weeks:
                 week_group = season_df[season_df[week_col] == wk]
                 if week_group.empty:

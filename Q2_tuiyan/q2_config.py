@@ -22,7 +22,12 @@ def default_config() -> Q2Config:
         clean_csv=root / "outputs" / "dwts_long_clean.csv",
         npz_dir=root / "Q1_data_expo",
         output_dir=root / "outputs" / "q2_counterfactual",
-        tracker_names=("Jerry Rice", "Bobby Bones"),
+        tracker_names=(
+            "Jerry Rice",
+            "Billy Ray Cyrus",
+            "Bristol Palin",
+            "Bobby Bones",
+        ),
         use_season_segments=True,
         png_dpi=160,
     )

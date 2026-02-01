@@ -177,14 +177,25 @@ def plot_tracker_lines(df: pd.DataFrame, output_dir: Path, dpi: int) -> None:
         sub = df[df["celebrity"] == celeb].copy()
         if sub.empty:
             continue
-        plt.figure(figsize=(8, 4.5))
+        sub = sub.sort_values(["season", "week", "method"]).reset_index(drop=True)
+        points = (
+            sub[["season", "week"]]
+            .drop_duplicates()
+            .sort_values(["season", "week"])
+            .reset_index(drop=True)
+        )
+        x_labels = [f"S{int(r.season)}W{int(r.week)}" for r in points.itertuples(index=False)]
+        x_map = {(int(r.season), int(r.week)): i for i, r in enumerate(points.itertuples(index=False))}
+
+        plt.figure(figsize=(max(8, 0.6 * len(x_labels)), 4.5))
         for method in sub["method"].unique():
             s = sub[sub["method"] == method].sort_values(["season", "week"])
-            x = np.arange(len(s))
-            plt.plot(x, s["elimination_probability"], label=method)
+            x = np.array([x_map[(int(a), int(b))] for a, b in zip(s["season"], s["week"])])
+            plt.plot(x, s["elimination_probability"], label=method, marker="o", linewidth=1.8)
         plt.title(f"Elimination Probability: {celeb}")
         plt.ylabel("Probability")
-        plt.xlabel("Time (season-week order)")
+        plt.xlabel("Season-Week")
+        plt.xticks(ticks=np.arange(len(x_labels)), labels=x_labels, rotation=45, ha="right")
         plt.legend()
         plt.tight_layout()
         path = output_dir / f"tracker_{celeb.replace(' ', '_')}.png"
