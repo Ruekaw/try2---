@@ -14,7 +14,7 @@ from scipy.special import gammaln
 from typing import Optional, List, Tuple, Dict
 from dataclasses import dataclass
 
-from config import MCMCConfig, COMBINE_PERCENT, COMBINE_RANK
+from config import MCMCConfig, COMBINE_PERCENT, COMBINE_RANK, get_violation_lambda
 from scoring import (
     compute_total_scores,
     compute_total_violation,
@@ -55,14 +55,17 @@ class UnifiedMCMCSampler:
         log_beta = np.sum(gammaln(alpha)) - gammaln(np.sum(alpha))
         return -log_beta + np.sum((alpha - 1) * np.log(v))
     
-    def _log_prior(self, v: np.ndarray) -> float:
+    def _log_prior(self, v: np.ndarray, alpha_override: Optional[np.ndarray] = None) -> float:
         """
         计算先验对数概率
         
         prior(v) = Dirichlet(α, α, ..., α)
         """
         n = len(v)
-        alpha = np.full(n, self.config.prior_alpha)
+        if alpha_override is not None:
+            alpha = alpha_override
+        else:
+            alpha = np.full(n, self.config.prior_alpha)
         return self._log_dirichlet_pdf(v, alpha)
     
     def _log_proposal(self, v_to: np.ndarray, v_from: np.ndarray) -> float:
@@ -94,7 +97,9 @@ class UnifiedMCMCSampler:
         combine_method: str,
         is_finale: bool = False,
         placements: Optional[List[int]] = None,
-        judge_save_enabled: bool = False
+        judge_save_enabled: bool = False,
+        prior_alpha_override: Optional[np.ndarray] = None,
+        violation_lambda: Optional[float] = None
     ) -> Tuple[float, float]:
         """
         计算后验对数概率（未归一化）
@@ -105,7 +110,7 @@ class UnifiedMCMCSampler:
         Returns:
             (log_posterior, violation)
         """
-        log_prior = self._log_prior(v)
+        log_prior = self._log_prior(v, prior_alpha_override)
         
         violation = compute_total_violation(
             v, judge_scores, eliminated_indices, combine_method,
@@ -114,8 +119,10 @@ class UnifiedMCMCSampler:
         )
         
         if self.config.soft_elimination:
+            if violation_lambda is None:
+                violation_lambda = get_violation_lambda(self.config, combine_method)
             # 软约束
-            log_posterior = log_prior - self.config.violation_lambda * violation
+            log_posterior = log_prior - float(violation_lambda) * violation
         else:
             # 硬约束
             if violation > 0:
@@ -179,7 +186,9 @@ class UnifiedMCMCSampler:
         combine_method: str,
         is_finale: bool = False,
         placements: Optional[List[int]] = None,
-        judge_save_enabled: bool = False
+        judge_save_enabled: bool = False,
+        prior_alpha_override: Optional[np.ndarray] = None,
+        violation_lambda_override: Optional[float] = None
     ) -> SamplingResult:
         """
         执行 MCMC 采样
@@ -219,7 +228,8 @@ class UnifiedMCMCSampler:
         # 计算当前状态的后验
         current_log_post, current_violation = self._log_posterior(
             current, judge_scores, eliminated_indices, combine_method,
-            is_finale, placements, judge_save_enabled
+            is_finale, placements, judge_save_enabled, prior_alpha_override,
+            violation_lambda_override
         )
         
         # 存储样本和诊断信息
@@ -234,7 +244,8 @@ class UnifiedMCMCSampler:
             # 计算提议状态的后验
             proposed_log_post, proposed_violation = self._log_posterior(
                 proposed, judge_scores, eliminated_indices, combine_method,
-                is_finale, placements, judge_save_enabled
+                is_finale, placements, judge_save_enabled, prior_alpha_override,
+                violation_lambda_override
             )
             
             # 计算 M-H 接受比
@@ -292,8 +303,7 @@ if __name__ == "__main__":
         n_samples=1000,
         burn_in=500,
         thin=2,
-        soft_elimination=True,
-        violation_lambda=50.0
+        soft_elimination=True
     )
     
     # 模拟数据：第1赛季第4周

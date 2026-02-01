@@ -28,14 +28,15 @@ class MCMCConfig:
                                    # α=1: 均匀先验（最大熵）
                                    # α>1: 偏好均匀分布
                                    # α<1: 偏好稀疏分布
+
+    # === 时间平滑（跨周先验）===
+    temporal_smoothing_enabled: bool = True  # 是否启用“上周后验作为本周先验”
+    temporal_alpha: float = 40.0              # 惯性系数 α（越大越粘）
+    temporal_beta: float = 1.0                # 平滑项 β（避免零先验）
     
     # === 约束参数 ===
     soft_elimination: bool = True  # 是否使用软约束（推荐True）
-    # 软约束惩罚强度 λ（历史字段：当不启用“按赛制自适应”时使用）
-    violation_lambda: float = 50.0
-
     # 按赛制自适应的 λ（默认启用，避免 percent 与 rank 的违约量纲不一致导致的“隐式硬约束”）
-    use_method_specific_lambda: bool = True
     violation_lambda_percent: float = 50.0  # 百分比制（S3-S27）：违约通常是 0.0x 量级
     violation_lambda_rank: float = 3.0      # 排名制（S1-S2, S28+）：违约通常是整数 1,2,...
     
@@ -153,8 +154,6 @@ def get_violation_lambda(mcmc_config: MCMCConfig, combine_method: str) -> float:
     - rank 违约通常是整数 1,2,...
     因此默认使用“按赛制自适应”的两套 λ。
     """
-    if not mcmc_config.use_method_specific_lambda:
-        return float(mcmc_config.violation_lambda)
     if combine_method == COMBINE_RANK:
         return float(mcmc_config.violation_lambda_rank)
     return float(mcmc_config.violation_lambda_percent)
@@ -167,12 +166,9 @@ if __name__ == "__main__":
     print(f"样本数: {mcmc_cfg.n_samples}")
     print(f"预热期: {mcmc_cfg.burn_in}")
     print(f"稀疏间隔: {mcmc_cfg.thin}")
-    if mcmc_cfg.use_method_specific_lambda:
-        print("惩罚强度: 按赛制自适应")
-        print(f"  percent λ: {mcmc_cfg.violation_lambda_percent}")
-        print(f"  rank    λ: {mcmc_cfg.violation_lambda_rank}")
-    else:
-        print(f"惩罚强度(统一λ): {mcmc_cfg.violation_lambda}")
+    print("惩罚强度: 按赛制自适应")
+    print(f"  percent λ: {mcmc_cfg.violation_lambda_percent}")
+    print(f"  rank    λ: {mcmc_cfg.violation_lambda_rank}")
     print()
     print("=== 路径配置 ===")
     print(f"工作目录: {path_cfg.workspace}")

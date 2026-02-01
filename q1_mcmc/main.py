@@ -65,12 +65,6 @@ def parse_args():
         help="稀疏采样间隔"
     )
     parser.add_argument(
-        "--lambda", dest="violation_lambda",
-        type=float,
-        default=None,
-        help="统一的软约束惩罚强度（设置后将覆盖分赛制 lambda）"
-    )
-    parser.add_argument(
         "--lambda-percent",
         type=float,
         default=50.0,
@@ -81,11 +75,6 @@ def parse_args():
         type=float,
         default=3.0,
         help="排名制（S1-2, S28+）的软约束惩罚强度"
-    )
-    parser.add_argument(
-        "--no-method-specific-lambda",
-        action="store_true",
-        help="禁用按赛制自适应 lambda，改用统一 --lambda"
     )
     parser.add_argument(
         "--proposal-scale",
@@ -174,19 +163,9 @@ def main():
     
     # === 配置 ===
     
-    # === 软约束 λ：按赛制自适应（默认）===
-    use_method_specific_lambda = not args.no_method_specific_lambda
-    if args.violation_lambda is not None:
-        # 显式指定统一 lambda 时：覆盖分赛制 lambda
-        use_method_specific_lambda = False
-        lambda_percent = float(args.violation_lambda)
-        lambda_rank = float(args.violation_lambda)
-        lambda_global = float(args.violation_lambda)
-    else:
-        lambda_percent = float(args.lambda_percent)
-        lambda_rank = float(args.lambda_rank)
-        # 历史字段保留：当关闭按赛制自适应时使用
-        lambda_global = float(args.lambda_percent)
+    # === 软约束 λ：按赛制自适应 ===
+    lambda_percent = float(args.lambda_percent)
+    lambda_rank = float(args.lambda_rank)
 
     # MCMC 配置
     mcmc_config = MCMCConfig(
@@ -196,8 +175,6 @@ def main():
         proposal_scale=args.proposal_scale,
         prior_alpha=args.prior_alpha,
         soft_elimination=not args.hard_constraint,
-        violation_lambda=lambda_global,
-        use_method_specific_lambda=use_method_specific_lambda,
         violation_lambda_percent=lambda_percent,
         violation_lambda_rank=lambda_rank,
         judge_save_enabled=not args.no_judge_save,
@@ -244,12 +221,9 @@ def main():
     print(f"  样本数: {mcmc_config.n_samples}")
     print(f"  预热期: {mcmc_config.burn_in}")
     print(f"  稀疏间隔: {mcmc_config.thin}")
-    if mcmc_config.use_method_specific_lambda:
-        print("  惩罚强度: 按赛制自适应")
-        print(f"    percent λ: {mcmc_config.violation_lambda_percent}")
-        print(f"    rank    λ: {mcmc_config.violation_lambda_rank}")
-    else:
-        print(f"  惩罚强度(统一λ): {mcmc_config.violation_lambda}")
+    print("  惩罚强度: 按赛制自适应")
+    print(f"    percent λ: {mcmc_config.violation_lambda_percent}")
+    print(f"    rank    λ: {mcmc_config.violation_lambda_rank}")
     print(f"  约束模式: {'硬约束' if args.hard_constraint else '软约束'}")
     print(f"  评委救人: {'启用' if not args.no_judge_save else '禁用'}")
     if season_range:

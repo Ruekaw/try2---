@@ -13,7 +13,7 @@ MCM 2026 Problem C - Q1: MCMC粉丝投票反推模型
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
@@ -145,6 +145,38 @@ def _prepare_week_inputs(
     return week_df, contestant_names, eliminated_indices, is_finale, placements
 
 
+def _build_temporal_prior(
+    contestant_names: List[str],
+    prev_names: Optional[List[str]],
+    prev_mean_votes: Optional[np.ndarray],
+    alpha: float,
+    beta: float
+) -> np.ndarray:
+    """
+    构造跨周先验：Dirichlet(alpha * v_{t-1} + beta)
+
+    新加入/复活选手使用 1/n 作为上一周均值。
+    """
+    n = len(contestant_names)
+    if n == 0:
+        return np.array([])
+
+    base = np.full(n, 1.0 / n, dtype=float)
+    if prev_names and prev_mean_votes is not None and len(prev_names) == len(prev_mean_votes):
+        prev_map = {name: float(prev_mean_votes[i]) for i, name in enumerate(prev_names)}
+        for i, name in enumerate(contestant_names):
+            if name in prev_map:
+                base[i] = prev_map[name]
+
+    s = float(np.sum(base))
+    if s <= 0:
+        base[:] = 1.0 / n
+    else:
+        base /= s
+
+    return alpha * base + beta
+
+
 def _infer_week_core(
     season: int,
     week: int,
@@ -153,25 +185,27 @@ def _infer_week_core(
     eliminated_indices: List[int],
     is_finale: bool,
     placements: Optional[List[int]],
-    mcmc_config: MCMCConfig
+    mcmc_config: MCMCConfig,
+    prior_alpha_override: Optional[np.ndarray] = None
 ) -> WeekResult:
     """统一的单周推断核心（串行/并行共用）。"""
     judge_scores = week_df['week_total_score'].values.astype(float)
 
     combine_method = get_combine_method(season)
     effective_lambda = get_violation_lambda(mcmc_config, combine_method)
-    week_config = replace(mcmc_config, violation_lambda=effective_lambda)
 
     judge_save = is_judge_save_season(season) and mcmc_config.judge_save_enabled
 
-    sampler = UnifiedMCMCSampler(week_config)
+    sampler = UnifiedMCMCSampler(mcmc_config)
     result = sampler.sample(
         judge_scores=judge_scores,
         eliminated_indices=eliminated_indices,
         combine_method=combine_method,
         is_finale=is_finale,
         placements=placements,
-        judge_save_enabled=judge_save
+        judge_save_enabled=judge_save,
+        prior_alpha_override=prior_alpha_override,
+        violation_lambda_override=effective_lambda
     )
 
     if not result.converged:
@@ -228,11 +262,24 @@ def _infer_season_core(
     season_result = SeasonResult(season=season, combine_method=combine_method)
 
     weeks = sorted(season_df['week'].unique())
+    prev_names: Optional[List[str]] = None
+    prev_mean_votes: Optional[np.ndarray] = None
     for week in weeks:
         prepared = _prepare_week_inputs(season, week, season_df, filter_config)
         if prepared is None:
             continue
         week_df, contestant_names, eliminated_indices, is_finale, placements = prepared
+
+        prior_override = None
+        if mcmc_config.temporal_smoothing_enabled and prev_mean_votes is not None:
+            prior_override = _build_temporal_prior(
+                contestant_names,
+                prev_names,
+                prev_mean_votes,
+                mcmc_config.temporal_alpha,
+                mcmc_config.temporal_beta
+            )
+
         week_result = _infer_week_core(
             season,
             week,
@@ -241,10 +288,13 @@ def _infer_season_core(
             eliminated_indices,
             is_finale,
             placements,
-            mcmc_config
+            mcmc_config,
+            prior_alpha_override=prior_override
         )
         if week_result is not None:
             season_result.add_week(week, week_result)
+            prev_names = week_result.contestant_names
+            prev_mean_votes = week_result.mean_votes
 
     return season_result
 
@@ -536,10 +586,8 @@ class UnifiedFanVoteInferenceEngine:
                 'n_samples': self.mcmc_config.n_samples,
                 'burn_in': self.mcmc_config.burn_in,
                 'thin': self.mcmc_config.thin,
-                'use_method_specific_lambda': self.mcmc_config.use_method_specific_lambda,
                 'violation_lambda_percent': self.mcmc_config.violation_lambda_percent,
                 'violation_lambda_rank': self.mcmc_config.violation_lambda_rank,
-                'violation_lambda': self.mcmc_config.violation_lambda,
                 'soft_elimination': self.mcmc_config.soft_elimination
             }
         }
