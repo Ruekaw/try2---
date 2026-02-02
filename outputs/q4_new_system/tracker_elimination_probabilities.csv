@@ -1,0 +1,141 @@
+season,week,method,celebrity,elimination_probability
+11,1,rank_direct,Bristol Palin,0.0091
+11,1,rank_save,Bristol Palin,0.0006
+11,1,percent_direct,Bristol Palin,0.0353
+11,1,percent_save,Bristol Palin,0.0187
+11,1,daws_direct,Bristol Palin,0.052
+11,2,rank_direct,Bristol Palin,0.0
+11,2,rank_save,Bristol Palin,0.0
+11,2,percent_direct,Bristol Palin,0.0202
+11,2,percent_save,Bristol Palin,0.0044
+11,2,daws_direct,Bristol Palin,0.0562
+11,3,rank_direct,Bristol Palin,0.0641
+11,3,rank_save,Bristol Palin,0.0094
+11,3,percent_direct,Bristol Palin,0.0703
+11,3,percent_save,Bristol Palin,0.0528
+11,3,daws_direct,Bristol Palin,0.0623
+11,4,rank_direct,Bristol Palin,0.0667
+11,4,rank_save,Bristol Palin,0.0146
+11,4,percent_direct,Bristol Palin,0.0734
+11,4,percent_save,Bristol Palin,0.038
+11,4,daws_direct,Bristol Palin,0.0723
+11,5,rank_direct,Bristol Palin,0.3528
+11,5,rank_save,Bristol Palin,0.6057
+11,5,percent_direct,Bristol Palin,0.0891
+11,5,percent_save,Bristol Palin,0.2587
+11,5,daws_direct,Bristol Palin,0.0448
+11,6,rank_direct,Bristol Palin,0.311
+11,6,rank_save,Bristol Palin,0.1866
+11,6,percent_direct,Bristol Palin,0.0718
+11,6,percent_save,Bristol Palin,0.2195
+11,6,daws_direct,Bristol Palin,0.0459
+11,8,rank_direct,Bristol Palin,0.3234
+11,8,rank_save,Bristol Palin,0.8851
+11,8,percent_direct,Bristol Palin,0.0722
+11,8,percent_save,Bristol Palin,0.3106
+11,8,daws_direct,Bristol Palin,0.0979
+11,9,rank_direct,Bristol Palin,0.3629
+11,9,rank_save,Bristol Palin,0.9769
+11,9,percent_direct,Bristol Palin,0.0566
+11,9,percent_save,Bristol Palin,0.3543
+11,9,daws_direct,Bristol Palin,0.1025
+15,2,rank_direct,Bristol Palin,0.3888
+15,2,rank_save,Bristol Palin,0.5778
+15,2,percent_direct,Bristol Palin,0.1249
+15,2,percent_save,Bristol Palin,0.2038
+15,2,daws_direct,Bristol Palin,0.0603
+15,3,rank_direct,Bristol Palin,0.2986
+15,3,rank_save,Bristol Palin,0.5807
+15,3,percent_direct,Bristol Palin,0.0642
+15,3,percent_save,Bristol Palin,0.1725
+15,3,daws_direct,Bristol Palin,0.0428
+15,4,rank_direct,Bristol Palin,0.7312
+15,4,rank_save,Bristol Palin,0.4111
+15,4,percent_direct,Bristol Palin,0.6352
+15,4,percent_save,Bristol Palin,0.6756
+15,4,daws_direct,Bristol Palin,0.5452
+27,1,rank_direct,Bobby Bones,0.0003
+27,1,rank_save,Bobby Bones,0.0
+27,1,percent_direct,Bobby Bones,0.0388
+27,1,percent_save,Bobby Bones,0.0127
+27,1,daws_direct,Bobby Bones,0.0541
+27,2,rank_direct,Bobby Bones,0.0708
+27,2,rank_save,Bobby Bones,0.0173
+27,2,percent_direct,Bobby Bones,0.0963
+27,2,percent_save,Bobby Bones,0.0615
+27,2,daws_direct,Bobby Bones,0.0873
+27,3,rank_direct,Bobby Bones,0.0236
+27,3,rank_save,Bobby Bones,0.0028
+27,3,percent_direct,Bobby Bones,0.0543
+27,3,percent_save,Bobby Bones,0.0278
+27,3,daws_direct,Bobby Bones,0.0551
+27,4,rank_direct,Bobby Bones,0.3443
+27,4,rank_save,Bobby Bones,0.2731
+27,4,percent_direct,Bobby Bones,0.1003
+27,4,percent_save,Bobby Bones,0.1934
+27,4,daws_direct,Bobby Bones,0.0466
+27,6,rank_direct,Bobby Bones,0.1152
+27,6,rank_save,Bobby Bones,0.1482
+27,6,percent_direct,Bobby Bones,0.0655
+27,6,percent_save,Bobby Bones,0.1859
+27,6,daws_direct,Bobby Bones,0.0418
+27,8,rank_direct,Bobby Bones,0.4036
+27,8,rank_save,Bobby Bones,0.9302
+27,8,percent_direct,Bobby Bones,0.0631
+27,8,percent_save,Bobby Bones,0.382
+27,8,daws_direct,Bobby Bones,0.0825
+2,1,rank_direct,Jerry Rice,0.0005
+2,1,rank_save,Jerry Rice,0.0
+2,1,percent_direct,Jerry Rice,0.0353
+2,1,percent_save,Jerry Rice,0.0138
+2,1,daws_direct,Jerry Rice,0.0697
+2,2,rank_direct,Jerry Rice,0.0
+2,2,rank_save,Jerry Rice,0.0
+2,2,percent_direct,Jerry Rice,0.1018
+2,2,percent_save,Jerry Rice,0.0284
+2,2,daws_direct,Jerry Rice,0.1283
+2,4,rank_direct,Jerry Rice,0.0073
+2,4,rank_save,Jerry Rice,0.0013
+2,4,percent_direct,Jerry Rice,0.0114
+2,4,percent_save,Jerry Rice,0.0114
+2,4,daws_direct,Jerry Rice,0.0521
+2,5,rank_direct,Jerry Rice,0.0094
+2,5,rank_save,Jerry Rice,0.0036
+2,5,percent_direct,Jerry Rice,0.0718
+2,5,percent_save,Jerry Rice,0.0749
+2,5,daws_direct,Jerry Rice,0.0622
+2,6,rank_direct,Jerry Rice,0.0248
+2,6,rank_save,Jerry Rice,0.025
+2,6,percent_direct,Jerry Rice,0.012
+2,6,percent_save,Jerry Rice,0.0177
+2,6,daws_direct,Jerry Rice,0.017
+2,7,rank_direct,Jerry Rice,0.4777
+2,7,rank_save,Jerry Rice,1.0
+2,7,percent_direct,Jerry Rice,0.0813
+2,7,percent_save,Jerry Rice,0.2686
+2,7,daws_direct,Jerry Rice,0.1932
+4,3,rank_direct,Billy Ray Cyrus,0.0341
+4,3,rank_save,Billy Ray Cyrus,0.017
+4,3,percent_direct,Billy Ray Cyrus,0.0763
+4,3,percent_save,Billy Ray Cyrus,0.0746
+4,3,daws_direct,Billy Ray Cyrus,0.0731
+4,4,rank_direct,Billy Ray Cyrus,0.013
+4,4,rank_save,Billy Ray Cyrus,0.0016
+4,4,percent_direct,Billy Ray Cyrus,0.0407
+4,4,percent_save,Billy Ray Cyrus,0.0095
+4,4,daws_direct,Billy Ray Cyrus,0.0761
+4,5,rank_direct,Billy Ray Cyrus,0.0859
+4,5,rank_save,Billy Ray Cyrus,0.0175
+4,5,percent_direct,Billy Ray Cyrus,0.0775
+4,5,percent_save,Billy Ray Cyrus,0.0253
+4,5,daws_direct,Billy Ray Cyrus,0.0954
+4,7,rank_direct,Billy Ray Cyrus,0.2227
+4,7,rank_save,Billy Ray Cyrus,0.7871
+4,7,percent_direct,Billy Ray Cyrus,0.0885
+4,7,percent_save,Billy Ray Cyrus,0.3002
+4,7,daws_direct,Billy Ray Cyrus,0.0374
+4,8,rank_direct,Billy Ray Cyrus,0.9399
+4,8,rank_save,Billy Ray Cyrus,0.9964
+4,8,percent_direct,Billy Ray Cyrus,0.8384
+4,8,percent_save,Billy Ray Cyrus,0.9731
+4,8,daws_direct,Billy Ray Cyrus,0.9816

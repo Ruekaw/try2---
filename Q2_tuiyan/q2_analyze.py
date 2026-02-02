@@ -66,7 +66,7 @@ def _rank_to_quantile_badness(rank: np.ndarray, n: int) -> np.ndarray:
     return (rank.astype(float) - 1.0) / float(n - 1)
 
 
-def _method_results(week: WeekData) -> list[MethodResult]:
+def default_method_results(week: WeekData) -> list[MethodResult]:
     return [
         MethodResult(
             name="rank_direct",
@@ -95,13 +95,22 @@ def _method_results(week: WeekData) -> list[MethodResult]:
     ]
 
 
+def _method_results(week: WeekData) -> list[MethodResult]:
+    # Backwards-compatible alias for internal callers.
+    return default_method_results(week)
+
+
 def _progress(iterable, desc: str):
     if tqdm is None:
         return iterable
     return tqdm(iterable, desc=desc)
 
 
-def analyze_core_weeks(core_weeks: list[WeekData]) -> pd.DataFrame:
+def analyze_core_weeks(
+    core_weeks: list[WeekData],
+    *,
+    method_results_fn=None,
+) -> pd.DataFrame:
     rows = []
     for week in _progress(core_weeks, desc="Core weeks"):
         if len(week.actual_eliminated) == 0:
@@ -115,7 +124,8 @@ def analyze_core_weeks(core_weeks: list[WeekData]) -> pd.DataFrame:
 
         judge_top = int(np.argmax(week.judge_scores))
 
-        for result in _method_results(week):
+        results = method_results_fn(week) if method_results_fn is not None else _method_results(week)
+        for result in results:
             elim = result.eliminations
             reversal = None
             if actual_idx is not None:
@@ -419,10 +429,16 @@ def plot_finale_heatmap(
     plt.close()
 
 
-def analyze_trackers(core_weeks: list[WeekData], names: list[str]) -> pd.DataFrame:
+def analyze_trackers(
+    core_weeks: list[WeekData],
+    names: list[str],
+    *,
+    method_results_fn=None,
+) -> pd.DataFrame:
     rows = []
     for week in _progress(core_weeks, desc="Tracker weeks"):
-        for result in _method_results(week):
+        results = method_results_fn(week) if method_results_fn is not None else _method_results(week)
+        for result in results:
             for name in names:
                 if name not in week.contestants:
                     continue
