@@ -57,10 +57,36 @@ def summarize_fixed_effects(idata, hdi_prob: float = 0.95) -> pd.DataFrame:
 
 
 def _find_group_var(idata, group_name: str) -> Optional[str]:
+    """Find the posterior variable that contains per-level random effects.
+
+    Bambi may store group-level effects as:
+    - `1|group` with dims (chain, draw, group__factor_dim)
+    - `1|group_sigma` with dims (chain, draw)
+
+    We must prefer the former; otherwise downstream summaries become empty.
+    """
+    if not hasattr(idata, "posterior"):
+        return None
+
+    candidates: List[str] = []
     for v in idata.posterior.data_vars:
-        if group_name in v and "|" in v:
-            return v
-    return None
+        if "|" not in v or group_name not in v:
+            continue
+        arr = idata.posterior[v]
+        other_dims = [d for d in arr.dims if d not in ("chain", "draw")]
+        if other_dims:
+            candidates.append(v)
+
+    if not candidates:
+        return None
+
+    exact = f"1|{group_name}"
+    if exact in candidates:
+        return exact
+
+    # Prefer shorter names (e.g., avoid offsets/aux vars if any)
+    candidates.sort(key=lambda s: (len(s), s))
+    return candidates[0]
 
 
 def summarize_random_effects(idata, group_name: str, hdi_prob: float = 0.95) -> pd.DataFrame:
@@ -101,7 +127,11 @@ def summarize_delta(idata_fan, idata_judge, hdi_prob: float = 0.95) -> pd.DataFr
         delta = fan - judge
         summary = az.summary(delta, hdi_prob=hdi_prob)
         summary = summary.reset_index().rename(columns={"index": "param"})
-        summary["param"] = name
+        # For scalar params (e.g., Intercept), normalize the name.
+        # For vector params (e.g., industry levels), keep component labels like
+        # `industry[Athlete]` so downstream comparisons remain interpretable.
+        if len(summary) == 1:
+            summary["param"] = name
         rows.append(summary)
 
     return pd.concat(rows, ignore_index=True)

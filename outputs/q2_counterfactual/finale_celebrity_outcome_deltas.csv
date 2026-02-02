@@ -1,0 +1,4 @@
+season,week,celebrity,win_prob_rank,win_prob_percent,delta_win_prob(rank_minus_percent),exp_place_rank,exp_place_percent,delta_exp_place(rank_minus_percent)
+11,10,Bristol Palin,0.0273,0.0101,0.0172,2.7891,2.8936,-0.10450000000000026
+27,9,Bobby Bones,0.1669,0.9033,-0.7363999999999999,1.8433,1.1084,0.7348999999999999
+2,8,Jerry Rice,0.4101,0.7322,-0.32209999999999994,1.59,1.2943,0.2957000000000001
