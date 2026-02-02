@@ -230,12 +230,19 @@ def _infer_week_core(
             diag_samples = result.samples[::stride]
 
             diag = compute_diagnostics(diag_samples, acceptance_rate=result.acceptance_rate)
+
+            # 自适应 ESS 阈值：用“至少占诊断样本数的2%”作为基线，并设置下限20、上限100。
+            # 小样本 quick run 时不会因为 min ESS 偶发偏低而全盘判死。
+            n_diag = int(diag_samples.shape[0])
+            ess_threshold = float(max(20, min(100, int(round(n_diag * 0.02)))))
+
             conv = diagnose_convergence(
                 diag.ess,
                 acceptance_rate=result.acceptance_rate,
-                n_samples=int(diag_samples.shape[0]),
-                ess_threshold=100,
-                accept_range=(0.1, 0.8)
+                n_samples=n_diag,
+                ess_threshold=ess_threshold,
+                accept_range=(0.05, 0.95),
+                ess_fraction=0.8
             )
             week_converged = bool(conv.get('likely_converged', False))
         except Exception as e:

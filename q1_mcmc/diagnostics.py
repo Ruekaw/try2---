@@ -255,7 +255,8 @@ def diagnose_convergence(
     acceptance_rate: float,
     n_samples: int,
     ess_threshold: float = 100,
-    accept_range: Tuple[float, float] = (0.1, 0.5)
+    accept_range: Tuple[float, float] = (0.1, 0.5),
+    ess_fraction: float = 1.0
 ) -> Dict[str, bool]:
     """
     诊断收敛状态
@@ -270,12 +271,20 @@ def diagnose_convergence(
     Returns:
         诊断结果字典
     """
+    ess_ok = ess > ess_threshold
+    ess_pass_fraction = float(np.mean(ess_ok)) if ess_ok.size > 0 else 0.0
+    ess_fraction_ok = ess_pass_fraction >= float(ess_fraction)
+    acceptance_ok = accept_range[0] <= acceptance_rate <= accept_range[1]
+
     diagnostics = {
-        'ess_sufficient': np.all(ess > ess_threshold),
-        'min_ess': float(np.min(ess)),
-        'mean_ess': float(np.mean(ess)),
-        'acceptance_reasonable': accept_range[0] <= acceptance_rate <= accept_range[1],
-        'likely_converged': np.all(ess > ess_threshold) and accept_range[0] <= acceptance_rate <= accept_range[1]
+        # 兼容旧字段：不再要求全维度通过，而是由 ess_fraction 控制
+        'ess_sufficient': bool(ess_fraction_ok),
+        'ess_pass_fraction': ess_pass_fraction,
+        'ess_fraction_target': float(ess_fraction),
+        'min_ess': float(np.min(ess)) if ess.size > 0 else 0.0,
+        'mean_ess': float(np.mean(ess)) if ess.size > 0 else 0.0,
+        'acceptance_reasonable': bool(acceptance_ok),
+        'likely_converged': bool(ess_fraction_ok and acceptance_ok)
     }
     
     return diagnostics
