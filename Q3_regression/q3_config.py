@@ -20,13 +20,18 @@ class Q3Config:
     min_k_cover: float = 0.80
     min_survival_ratio: float = 0.75
 
+    # K 灵敏度：对这些 K 分别拟合并输出“跨 K 汇总表”。
+    # 当前只关心 K=4 的结果，其他 K 不再额外拟合。
+    k_sensitivity_values: Sequence[int] = (4,)
+    k_sensitivity_skip_existing: bool = True
+
     eps: float = 1e-6
 
     # MCMC (PyMC/Bambi)
-    draws: int = 1000
-    tune: int = 1000
+    draws: int = 1200 #原先1000
+    tune: int = 1200 #原先1000
     chains: int = 4
-    target_accept: float = 0.90
+    target_accept: float = 0.92
     random_seed: int = 42
 
     # 进度显示
@@ -36,5 +41,5 @@ class Q3Config:
     # fan 数据使用策略
     use_fan_mean: bool = True
     use_fan_samples: bool = True
-    fan_sample_sets: int = 50
+    fan_sample_sets: int = 30 #原先50
     sample_seed: int = 20240202

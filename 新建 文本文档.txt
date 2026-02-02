@@ -38,7 +38,7 @@ Q2数据可视化
 "Posterior Predictive Propagation for Fan Estimates"
 "Since the true fan votes are latent variables estimated from our MCMC model (Q1), treating them as fixed point estimates (e.g., using the mean) would artificially reduce the variance and lead to overconfident conclusions in the regression (Q3).
 To rigorously propagate this uncertainty, we employed a Multiple Imputation strategy based on the posterior samples. We extracted $M=50$ likely trajectories of fan votes from the Q1 posterior distribution and fitted the hierarchical regression model to each. The final posterior distributions for the regression coefficients ($\beta$) were obtained by pooling the samples from all $M$ models. This ensures that our reported credible intervals for Age and Industry effects fully account for the uncertainty in the underlying fan vote estimates."
-(由于真实的粉丝投票是我们MCMC模型（Q1）估计的潜在变量，将其视为固定点估计（例如使用均值）会人为地减少方差，并导致回归（Q3）中过于自信的结论。为了严格地传播这种不确定性，我们采用了基于后验样本的多重插补策略。我们从Q1后验分布中提取了 $M=50$ 条可能的粉丝投票轨迹，并对每条轨迹拟合分层回归模型。回归系数（$\beta$）的最终后验分布是通过汇集所有 $M$ 个模型的样本获得的。这确保了我们报告的年龄和行业效应的可信区间充分考虑了底层粉丝投票估计中的不确定性。)
+(由于真实的粉丝投票是我们MCMC模型（Q1）估计的潜在变量，将其视为固定点估计（例如使用均值）会人为地减少方差，并导致回归（Q3）中过于自信的结论。为了严格地传播这种不确定性，我们采用了基于后验样本的多重插补策略。我们从Q1后验分布中提取了 $S=30$ 条可能的粉丝投票轨迹，并对每条轨迹拟合分层回归模型。回归系数（$\beta$）的最终后验分布是通过汇集所有 $M$ 个模型的样本获得的。这确保了我们报告的年龄和行业效应的可信区间充分考虑了底层粉丝投票估计中的不确定性。)
 
 
 
