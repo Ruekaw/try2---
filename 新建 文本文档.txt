@@ -1,3 +1,50 @@
 TODO
-1、可以在百分比那里引入一个线性规划来作为MCMC初始解。
-2、Q2加上更多争议选手分析。
+1、Q1可以在百分比那里引入一个线性规划来作为MCMC初始解。
+Q1还得一堆可视化。
+2、Q2加上更多争议选手分析。（好了）
+Q2还得有更量化的样本（等待修改）
+Q2数据可视化
+
+
+3、Q3有两点——
+
+论文里的“稳健性检验”话术：
+"While a linear time trend assumes constant improvement, dance skills typically follow a learning curve with diminishing returns. We tested both linear and logarithmic specifications for the 'Week' variable. Model comparison (via LOO/WAIC) favored the logarithmic term, confirming that improvement is rapid in early weeks and plateaus towards the finale."
+(虽然线性趋势假设持续不断的进步，但舞蹈技能通常遵循边际收益递减的学习曲线。我们测试了“周”变量的线性和对数两种形式。模型比较（通过LOO/WAIC）支持对数项，证实了进步在早期很快，并在接近决赛时趋于平稳。)
+
+
+确定性传播的表述 (Uncertainty Propagation)
+1. 客观分析：有道理吗？
+结论：这是提升论文档次的关键。
+朋友的建议（多重插补/后验传播）：听起来像是“我的模型从一开始就内嵌了对不确定性的处理”。这是系统性设计（Methodological Design）。
+数学本质：
+你的 Q1 输出不是一个“值”，而是一个“分布”（Distrubtion）。
+你的 Q3 输入不应该是一个“数”，而应该承接 Q1 的分布。
+这在贝叶斯统计中叫 "Full Bayesian Error Propagation"（全贝叶斯误差传播）。如果不这么做，直接取均值，你就人为地减少了数据中的噪声（Overconfidence），导致回归系数的置信区间（CI）过窄，P值虚低。
+2. 落地建议：怎么做、怎么写？
+操作层面（基于你现在的环境）：
+你不需要真的去学复杂的“多重插补（MI）”软件操作，因为你已经在做这事了——即“跑多次回归”。核心在于如何汇总。
+抽样：从 Q1 的 .npz 中抽取 $M=50$ 组完整的粉丝投票轨迹。
+循环：对这 50 组数据分别跑 Bambi 回归。
+合并（Pooling）：
+你会得到 50 个 InferenceData 对象。
+将这 50 个对象的后验链（Chains）拼接起来。例如，原本每个模型抽 2000 次，现在你就有了 $50 \times 2000 = 100,000$ 个后验样本。
+直接对这 10万个样本求均值和 HDI（最高密度区间）。
+注：这比传统的 Rubin's Rules (用于频率学派MI) 更直观，实际上就是一种 Monte Carlo Integration。
+
+论文里的“包装”话术：
+不要说 "We ran the model 50 times to check sensitivity."
+要说：
+"Posterior Predictive Propagation for Fan Estimates"
+"Since the true fan votes are latent variables estimated from our MCMC model (Q1), treating them as fixed point estimates (e.g., using the mean) would artificially reduce the variance and lead to overconfident conclusions in the regression (Q3).
+To rigorously propagate this uncertainty, we employed a Multiple Imputation strategy based on the posterior samples. We extracted $M=50$ likely trajectories of fan votes from the Q1 posterior distribution and fitted the hierarchical regression model to each. The final posterior distributions for the regression coefficients ($\beta$) were obtained by pooling the samples from all $M$ models. This ensures that our reported credible intervals for Age and Industry effects fully account for the uncertainty in the underlying fan vote estimates."
+(由于真实的粉丝投票是我们MCMC模型（Q1）估计的潜在变量，将其视为固定点估计（例如使用均值）会人为地减少方差，并导致回归（Q3）中过于自信的结论。为了严格地传播这种不确定性，我们采用了基于后验样本的多重插补策略。我们从Q1后验分布中提取了 $M=50$ 条可能的粉丝投票轨迹，并对每条轨迹拟合分层回归模型。回归系数（$\beta$）的最终后验分布是通过汇集所有 $M$ 个模型的样本获得的。这确保了我们报告的年龄和行业效应的可信区间充分考虑了底层粉丝投票估计中的不确定性。)
+
+
+
+8. 总结你的论文叙述逻辑
+模型建立：为了客观量化多源因素的影响，我们建立了双贝叶斯分层回归模型。分层结构用于剥离“赛季偏差”和“舞者能力偏差”。
+不确定性传播：利用第一问的MCMC采样结果，我们在回归中考虑了粉丝数据的不确定性（如果采用了第6步）。
+发现一（特征影响）：客观陈述年龄每增加1岁，排名/得分下降多少；哪种职业最具优势。
+发现二（舞者效应）：通过方差分量分析，我们发现职业舞者的选择解释了总变异的 X%。
+发现三（差异对比）：通过对比两个模型的系数，我们发现评委更看重技术（如...），而粉丝更看重...（如...）。
