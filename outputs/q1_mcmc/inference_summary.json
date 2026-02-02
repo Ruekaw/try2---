@@ -3,14 +3,17 @@
   "total_weeks_inferred": 261,
   "converged_weeks": 261,
   "convergence_rate": 1.0,
-  "mean_ppc_consistency": 0.80096091954023,
-  "std_ppc_consistency": 0.17878302654334208,
-  "mean_acceptance_rate": 0.4625408684546616,
+  "mean_ppc_consistency": 0.7739570881226054,
+  "std_ppc_consistency": 0.17328000682114125,
+  "mean_acceptance_rate": 0.44815371647509583,
+  "mean_hit_rate": 1.0,
+  "std_hit_rate": 0.0,
   "config": {
-    "n_samples": 5000,
-    "burn_in": 2000,
+    "n_samples": 10000,
+    "burn_in": 5000,
     "thin": 2,
-    "violation_lambda": 50.0,
+    "violation_lambda_percent": 50.0,
+    "violation_lambda_rank": 3.0,
     "soft_elimination": true
   }
 }

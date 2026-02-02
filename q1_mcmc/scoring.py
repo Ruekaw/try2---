@@ -207,7 +207,8 @@ def compute_elimination_violation(
     eliminated_indices: List[int],
     combine_method: str,
     judge_save_enabled: bool = False,
-    judge_save_bottom_k: int = 2
+    judge_save_bottom_k: int = 2,
+    survivor_candidates: Optional[List[int]] = None
 ) -> float:
     """
     计算淘汰约束的违约程度（用于软约束）
@@ -221,38 +222,50 @@ def compute_elimination_violation(
         违约程度（非负浮点数，0表示满足约束）
     """
     total_scores = compute_total_scores(fan_votes, judge_scores, combine_method)
-    n = len(fan_votes)
     k = len(eliminated_indices)
-    
+
+    # 基础违约：被淘汰者偏离 bottom-k 的程度
     if judge_save_enabled and k == 1:
-        check_k = judge_save_bottom_k
+        check_k = max(judge_save_bottom_k, 1)
     else:
-        check_k = k
-    
-    # 获取 bottom-k 的阈值分数
+        check_k = max(k, 1)
+
     if combine_method == COMBINE_PERCENT:
-        # 百分比制：找到第 check_k 小的分数作为阈值
+        # 百分比制：得分越低越差
         sorted_scores = np.sort(total_scores)
-        threshold = sorted_scores[check_k - 1]  # bottom-k 的最大值
-        
+        threshold = sorted_scores[min(check_k - 1, len(sorted_scores) - 1)]
+
         violation = 0.0
         for idx in eliminated_indices:
             score = total_scores[idx]
             if score > threshold:
-                # 分数比阈值高，说明不在 bottom-k，计算违约
                 violation += (score - threshold)
     else:
-        # 排名制：找到第 check_k 大的排名和作为阈值
-        sorted_scores = np.sort(total_scores)[::-1]  # 降序
-        threshold = sorted_scores[check_k - 1]  # bottom-k 的最小值
-        
+        # 排名制：排名和越大越差
+        sorted_scores = np.sort(total_scores)[::-1]
+        threshold = sorted_scores[min(check_k - 1, len(sorted_scores) - 1)]
+
         violation = 0.0
         for idx in eliminated_indices:
             score = total_scores[idx]
             if score < threshold:
-                # 排名和比阈值小，说明不在 bottom-k，计算违约
                 violation += (threshold - score)
-    
+
+    # 额外的评委救人机制约束：
+    # 当启用 judge_save 且仅淘汰 1 人时，
+    # 要求 bottom-k（通常为 bottom-2）中的另一人必须是“存活候选人”（即被救者）。
+    if judge_save_enabled and k == 1 and judge_save_bottom_k >= 2:
+        bottom_k = get_bottom_k_indices(total_scores, judge_save_bottom_k, combine_method)
+        if len(bottom_k) >= 2:
+            eliminated_idx = eliminated_indices[0]
+            other_indices = [i for i in bottom_k if i != eliminated_idx]
+
+            if survivor_candidates is not None and len(other_indices) > 0:
+                # 如果 bottom-k 里没有任何一个“其他人”属于存活候选集合，
+                # 则说明不可能由评委在这组 bottom-k 中救出真实的“幸存者”，记一个固定罚分。
+                if not any(i in survivor_candidates for i in other_indices):
+                    violation += 1.0
+
     return violation
 
 
@@ -314,7 +327,8 @@ def compute_total_violation(
     is_finale: bool = False,
     placements: Optional[List[int]] = None,
     judge_save_enabled: bool = False,
-    judge_save_bottom_k: int = 2
+    judge_save_bottom_k: int = 2,
+    survivor_candidates: Optional[List[int]] = None
 ) -> float:
     """
     计算总违约程度
@@ -336,8 +350,13 @@ def compute_total_violation(
         return compute_finale_violation(fan_votes, judge_scores, placements, combine_method)
     else:
         return compute_elimination_violation(
-            fan_votes, judge_scores, eliminated_indices,
-            combine_method, judge_save_enabled, judge_save_bottom_k
+            fan_votes,
+            judge_scores,
+            eliminated_indices,
+            combine_method,
+            judge_save_enabled,
+            judge_save_bottom_k,
+            survivor_candidates,
         )
 
 

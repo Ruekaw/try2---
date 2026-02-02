@@ -1,0 +1,125 @@
+这是一个非常好的补充。**Hit Rate (命中率)** 是最直观、最能向非专业人士（比如MCM评委）证明你模型有效性的指标。既然你已经有清洗好的淘汰人数数据，做这个验证非常快。
+
+这是一份给代码手（Developer）的简要工程文档，可以直接发给他/她实现。
+
+---
+
+# 工程文档：Hit Rate 验证指标计算模块
+
+## 1. 目标
+
+在后处理阶段（Post-processing），利用 MCMC 反推得到的粉丝投票均值（`fan_vote_mean`），验证模型是否准确“预测”了当周的淘汰结果。
+
+## 2. 核心定义
+
+### 2.1 基础 Hit Rate (Hit Rate@K)
+
+对于某一周，实际淘汰了  名选手。
+我们将模型推算的综合得分最差的  名选手定义为“**预测淘汰集合**”。
+
+* **取值范围**：
+* **完全命中**：1.0
+* **部分命中**：例如淘汰2人，只预测对了1人，则为 0.5。
+
+### 2.2 评委救人修正 (Judge's Save Hit Rate)
+
+**适用范围**：S28+ 且启用了 `judge_save` 的周次。
+**规则**：虽然只淘汰 1 人 ()，但只要该选手落在模型预测的 **Bottom-2** 中，即视为命中。
+
+---
+
+## 3. 实现逻辑
+
+建议在 `engine.py` 的 `WeekResult` 类中增加计算逻辑，或者在 `diagnostics.py` 中新增独立函数。
+
+### 输入数据需求
+
+1. **`fan_votes`**: 模型的粉丝投票均值向量 (from MCMC results)。
+2. **`judge_scores`**: 评委总分向量 (from data)。
+3. **`eliminated_indices`**: 实际被淘汰选手的索引列表。
+4. **`combine_method`**: `'percent'` 或 `'rank'`。
+5. **`judge_save_active`**: 本周是否触发评委救人（S28+ 且非决赛/非多淘汰）。
+
+### 算法流程
+
+1. **计算综合得分**：
+调用 `scoring.compute_total_scores(fan_votes, judge_scores, combine_method)`。
+2. **确定预测范围 K**：
+* 基础情况：。
+* 特殊情况（评委救人）：如果 `judge_save_active` 为 True 且 ，则设定预测范围大小 。
+
+
+3. **获取预测淘汰集 (Predicted Indices)**：
+* 如果 `combine_method == 'percent'`：取综合得分**最低**的  (或 ) 个索引。
+* 如果 `combine_method == 'rank'`：取综合得分（排名和）**最大**的  (或 ) 个索引。
+* *注意处理并列情况（Ties）：如果存在并列导致边界模糊，建议采用宽松策略（只要并列者包含实际淘汰者就算进）。*
+
+
+4. **计算交集与指标**：
+* 计算 `hit_count` = 预测集与实际集的交集大小。
+* `hit_rate` = `hit_count` / `len(eliminated_indices)`。
+
+
+
+---
+
+## 4. 代码实现示例 (Python)
+
+请将此函数集成到 `diagnostics.py` 或直接在分析脚本中使用。
+
+```python
+import numpy as np
+from scoring import compute_total_scores, get_bottom_k_indices
+
+def calculate_hit_rate(
+    fan_votes: np.ndarray,      # MCMC后验均值
+    judge_scores: np.ndarray,   # 实际评委分
+    eliminated_indices: list,   # 实际淘汰索引 [0, 4]
+    combine_method: str,        # 'percent' or 'rank'
+    judge_save_active: bool = False # 是否为评委救人周
+) -> float:
+    """
+    计算单周 Hit Rate
+    """
+    n_eliminated = len(eliminated_indices)
+    if n_eliminated == 0:
+        return np.nan  # 无淘汰周不计算
+    
+    # 1. 计算模型预测的综合得分
+    total_scores = compute_total_scores(fan_votes, judge_scores, combine_method)
+    
+    # 2. 确定预测截断点 (Cutoff)
+    # 如果是评委救人周(S28+)，即使只淘汰1人，只要他在Bottom-2里就算预测成功
+    k_pred = 2 if (judge_save_active and n_eliminated == 1) else n_eliminated
+    
+    # 3. 获取模型认为最该走的 k_pred 个人
+    # 注意：get_bottom_k_indices 需要在 scoring.py 中确保能处理 k > n_eliminated 的情况
+    predicted_bottom_indices = get_bottom_k_indices(
+        total_scores, 
+        k=k_pred, 
+        combine_method=combine_method
+    )
+    
+    # 4. 计算命中数
+    # 求交集：实际淘汰者有多少在预测名单里
+    hits = set(eliminated_indices).intersection(set(predicted_bottom_indices))
+    hit_count = len(hits)
+    
+    # 5. 计算比率
+    # 分母永远是实际淘汰人数
+    return hit_count / n_eliminated
+
+```
+
+## 5. 验证与报告
+
+### 验证建议
+
+1. **全样本验证**：跑完所有赛季后，计算所有有淘汰周的平均 Hit Rate。
+2. **多淘汰周验证**：重点检查 Season 2-4 等早期赛季的双淘汰周，验证 Hit Rate@2。
+3. **救人规则验证**：检查 Season 28+，确认 Hit Rate 没有显著下降（因为如果不考虑 Bottom-2 逻辑，S28+ 的 Hit Rate 会因为评委救人而天然偏低）。
+
+### 预期结果
+
+* 理想情况下，全局平均 Hit Rate 应 > 0.8。
+* 如果某周 Hit Rate = 0，说明发生了“爆冷”（Shock Elimination），这正是 Q2/Q3 分析的重点素材。

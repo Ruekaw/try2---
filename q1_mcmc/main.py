@@ -49,37 +49,43 @@ def parse_args():
     parser.add_argument(
         "--n-samples", "-n",
         type=int,
-        default=5000,
+        default=None,
         help="保留的有效样本数"
     )
     parser.add_argument(
         "--burn-in", "-b",
         type=int,
-        default=2000,
+        default=None,
         help="预热期样本数"
     )
     parser.add_argument(
         "--thin", "-t",
         type=int,
-        default=2,
+        default=None,
         help="稀疏采样间隔"
     )
     parser.add_argument(
-        "--lambda", dest="violation_lambda",
+        "--lambda-percent",
         type=float,
-        default=50.0,
-        help="软约束惩罚强度"
+        default=None,
+        help="百分比制（S3-27）的软约束惩罚强度"
+    )
+    parser.add_argument(
+        "--lambda-rank",
+        type=float,
+        default=None,
+        help="排名制（S1-2, S28+）的软约束惩罚强度"
     )
     parser.add_argument(
         "--proposal-scale",
         type=float,
-        default=100.0,
+        default=None,
         help="提议分布浓度缩放"
     )
     parser.add_argument(
         "--prior-alpha",
         type=float,
-        default=1.0,
+        default=None,
         help="Dirichlet先验浓度"
     )
     
@@ -121,12 +127,30 @@ def parse_args():
         action="store_true",
         help="禁用并行，使用串行模式"
     )
+
+    # 样本导出参数
+    parser.add_argument(
+        "--export-samples",
+        action="store_true",
+        help="导出每赛季的原始样本为 .npz"
+    )
+    parser.add_argument(
+        "--samples-dir",
+        type=str,
+        default=None,
+        help="样本导出目录（相对于工作目录，默认同输出目录）"
+    )
+    parser.add_argument(
+        "--keep-samples",
+        action="store_true",
+        help="在内存中保留样本（默认仅用于导出后释放）"
+    )
     
     # 其他
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=None,
         help="随机种子"
     )
     parser.add_argument(
@@ -157,17 +181,23 @@ def main():
     
     # === 配置 ===
     
+    # === 软约束 λ：按赛制自适应 ===
+    base_cfg = MCMCConfig()
+    lambda_percent = float(args.lambda_percent) if args.lambda_percent is not None else base_cfg.violation_lambda_percent
+    lambda_rank = float(args.lambda_rank) if args.lambda_rank is not None else base_cfg.violation_lambda_rank
+
     # MCMC 配置
     mcmc_config = MCMCConfig(
-        n_samples=args.n_samples,
-        burn_in=args.burn_in,
-        thin=args.thin,
-        proposal_scale=args.proposal_scale,
-        prior_alpha=args.prior_alpha,
+        n_samples=args.n_samples if args.n_samples is not None else base_cfg.n_samples,
+        burn_in=args.burn_in if args.burn_in is not None else base_cfg.burn_in,
+        thin=args.thin if args.thin is not None else base_cfg.thin,
+        proposal_scale=args.proposal_scale if args.proposal_scale is not None else base_cfg.proposal_scale,
+        prior_alpha=args.prior_alpha if args.prior_alpha is not None else base_cfg.prior_alpha,
         soft_elimination=not args.hard_constraint,
-        violation_lambda=args.violation_lambda,
+        violation_lambda_percent=lambda_percent,
+        violation_lambda_rank=lambda_rank,
         judge_save_enabled=not args.no_judge_save,
-        random_seed=args.seed
+        random_seed=args.seed if args.seed is not None else base_cfg.random_seed
     )
     
     # 路径配置
@@ -199,7 +229,8 @@ def main():
     use_parallel = not args.no_parallel
     
     if n_jobs is None:
-        n_jobs = max(1, os.cpu_count() - 1)
+        cpu = os.cpu_count() or 1
+        n_jobs = max(1, cpu - 1)
     
     # === 打印配置 ===
     
@@ -209,7 +240,9 @@ def main():
     print(f"  样本数: {mcmc_config.n_samples}")
     print(f"  预热期: {mcmc_config.burn_in}")
     print(f"  稀疏间隔: {mcmc_config.thin}")
-    print(f"  惩罚强度: {mcmc_config.violation_lambda}")
+    print("  惩罚强度: 按赛制自适应")
+    print(f"    percent λ: {mcmc_config.violation_lambda_percent}")
+    print(f"    rank    λ: {mcmc_config.violation_lambda_rank}")
     print(f"  约束模式: {'硬约束' if args.hard_constraint else '软约束'}")
     print(f"  评委救人: {'启用' if not args.no_judge_save else '禁用'}")
     if season_range:
@@ -218,6 +251,10 @@ def main():
         print(f"  排除赛季: {exclude_seasons}")
     print(f"  随机种子: {mcmc_config.random_seed}")
     print(f"  并行模式: {'启用' if use_parallel else '禁用'} ({n_jobs} 进程)")
+    if args.export_samples:
+        print("  样本导出: 启用")
+        print(f"  样本目录: {args.samples_dir or path_config.get_output_dir()}")
+        print(f"  保留样本: {'是' if args.keep_samples else '否'}")
     print()
     
     # === 创建引擎并运行 ===
@@ -231,7 +268,18 @@ def main():
     print()
     
     print("开始 MCMC 推断...")
-    engine.infer_all(n_jobs=n_jobs, use_parallel=use_parallel)
+    export_samples_dir = None
+    if args.export_samples:
+        export_samples_dir = Path(args.samples_dir) if args.samples_dir else path_config.get_output_dir()
+        if not export_samples_dir.is_absolute():
+            export_samples_dir = (workspace / export_samples_dir).resolve()
+
+    engine.infer_all(
+        n_jobs=n_jobs,
+        use_parallel=use_parallel,
+        export_samples_dir=export_samples_dir,
+        keep_samples=args.keep_samples
+    )
     
     inference_time = time.time() - start_time
     print(f"\n推断完成，耗时: {inference_time:.1f} 秒")
@@ -241,6 +289,10 @@ def main():
     
     print("导出结果...")
     long_df, wide_df, summary = engine.export_results()
+
+    if args.export_samples and args.keep_samples:
+        print("\n导出样本（来自内存）...")
+        engine.export_samples_npz(export_samples_dir)
     
     # === 生成诊断报告 ===
     
@@ -286,6 +338,7 @@ def main():
     print(f"推断周数: {sum(sr.n_weeks for sr in engine.results.values())}")
     print(f"平均 PPC 一致性: {summary['mean_ppc_consistency']:.3f}")
     print(f"平均接受率: {summary['mean_acceptance_rate']:.3f}")
+    print(f"平均 Hit Rate: {summary['mean_hit_rate']:.3f}")
     print()
     print("输出文件:")
     print(f"  - {path_config.get_output_dir() / path_config.output_long}")

@@ -17,6 +17,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import warnings
 
+from scoring import compute_total_scores
+
 # 可选导入 matplotlib（用于可视化）
 try:
     import matplotlib.pyplot as plt
@@ -35,6 +37,81 @@ class DiagnosticResult:
     autocorr_time: np.ndarray        # 自相关时间
     rhat: Optional[np.ndarray]       # R-hat（多链时）
     acceptance_rate: float
+
+
+def _get_bottom_candidates_with_ties(
+    total_scores: np.ndarray,
+    k: int,
+    combine_method: str,
+    tie_tolerance: float = 1e-9
+) -> List[int]:
+    """在考虑并列的情况下，返回 bottom-k 候选集合。"""
+    n = len(total_scores)
+    if n == 0 or k <= 0:
+        return []
+
+    if combine_method == 'percent':
+        order = np.argsort(total_scores)
+        threshold_idx = min(k - 1, n - 1)
+        threshold = total_scores[order[threshold_idx]]
+        mask = total_scores <= (threshold + tie_tolerance)
+    else:
+        order = np.argsort(-total_scores)
+        threshold_idx = min(k - 1, n - 1)
+        threshold = total_scores[order[threshold_idx]]
+        mask = total_scores >= (threshold - tie_tolerance)
+
+    return [i for i, flag in enumerate(mask) if flag]
+
+
+def compute_hit_rate_for_week(
+    fan_vote_mean: np.ndarray,
+    judge_scores: np.ndarray,
+    eliminated_indices: List[int],
+    combine_method: str,
+    judge_save_enabled: bool = False,
+    judge_save_bottom_k: int = 2,
+    tie_tolerance: float = 1e-9
+) -> float:
+    """
+    计算单周 Hit Rate 指标。
+
+    Returns:
+        Hit Rate ∈ [0, 1]；若无淘汰则返回 NaN。
+    """
+    k = len(eliminated_indices)
+    if k == 0:
+        return float('nan')
+
+    total_scores = compute_total_scores(fan_vote_mean, judge_scores, combine_method)
+    if judge_save_enabled and k == 1:
+        eval_k = max(judge_save_bottom_k, 1)
+    else:
+        eval_k = k
+
+    predicted_bottom = set(
+        _get_bottom_candidates_with_ties(total_scores, eval_k, combine_method, tie_tolerance)
+    )
+    hits = sum(1 for idx in eliminated_indices if idx in predicted_bottom)
+    return hits / k
+
+
+def summarize_hit_rates(results_df: pd.DataFrame) -> Dict[str, float]:
+    """汇总长表中的 Hit Rate（按周去重）。"""
+    if 'hit_rate' not in results_df.columns:
+        return {'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0, 'count': 0}
+
+    weekly = results_df.groupby(['season', 'week'])['hit_rate'].first().dropna()
+    if weekly.empty:
+        return {'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0, 'count': 0}
+
+    return {
+        'mean': float(weekly.mean()),
+        'std': float(weekly.std() if len(weekly) > 1 else 0.0),
+        'min': float(weekly.min()),
+        'max': float(weekly.max()),
+        'count': int(len(weekly))
+    }
 
 
 def compute_autocorrelation(x: np.ndarray, max_lag: int = None) -> np.ndarray:
@@ -287,17 +364,19 @@ def plot_certainty_heatmap(
     season: int,
     title: str = None,
     figsize: Tuple[int, int] = (14, 8),
-    cmap: str = 'RdYlGn'
+    cmap: str = 'RdYlGn',
+    log_scale: bool = True
 ) -> Optional[plt.Figure]:
     """
     绘制确定性热力图
     
     Args:
-        certainty_df: 包含 week, celebrity_name, certainty_index 的 DataFrame
+        certainty_df: 包含 week, celebrity_name, snr（或旧版 certainty_index）的 DataFrame
         season: 赛季号
         title: 标题
         figsize: 图形大小
         cmap: 颜色映射
+        log_scale: 是否对 SNR 做对数处理（默认 True，绘制 log10(1+SNR)）
     
     Returns:
         matplotlib Figure 或 None
@@ -306,17 +385,37 @@ def plot_certainty_heatmap(
         warnings.warn("matplotlib 未安装")
         return None
     
+    # 兼容列名：新版用 snr，旧版用 certainty_index
+    value_col = 'snr' if 'snr' in certainty_df.columns else 'certainty_index'
+
     # Pivot 数据
     pivot_df = certainty_df.pivot(
         index='celebrity_name',
         columns='week',
-        values='certainty_index'
+        values=value_col
     )
+
+    values = pivot_df.values.astype(float)
+    if log_scale:
+        values = np.log10(1.0 + np.maximum(values, 0.0))
+        cbar_label = 'log10(1 + SNR)'
+    else:
+        cbar_label = 'SNR (μ/σ)'
     
     fig, ax = plt.subplots(figsize=figsize)
     
-    # 绘制热力图
-    im = ax.imshow(pivot_df.values, cmap=cmap, aspect='auto', vmin=0, vmax=1)
+    # 绘制热力图（用分位数做稳健拉伸，避免极端值压缩颜色范围）
+    finite_vals = values[np.isfinite(values)]
+    if finite_vals.size > 0:
+        vmin = float(np.nanpercentile(finite_vals, 5))
+        vmax = float(np.nanpercentile(finite_vals, 95))
+        if np.isclose(vmin, vmax):
+            vmin = float(np.nanmin(finite_vals))
+            vmax = float(np.nanmax(finite_vals) + 1e-12)
+    else:
+        vmin, vmax = 0.0, 1.0
+
+    im = ax.imshow(values, cmap=cmap, aspect='auto', vmin=vmin, vmax=vmax)
     
     # 设置标签
     ax.set_xticks(range(len(pivot_df.columns)))
@@ -326,10 +425,10 @@ def plot_certainty_heatmap(
     
     # 添加颜色条
     cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('Certainty Index (λ)')
+    cbar.set_label(cbar_label)
     
     if title is None:
-        title = f"Season {season} - Fan Vote Certainty Heatmap"
+        title = f"Season {season} - Fan Vote SNR Heatmap" + (" (log)" if log_scale else "")
     ax.set_title(title)
     ax.set_xlabel("Week")
     ax.set_ylabel("Celebrity")
@@ -385,6 +484,8 @@ def generate_diagnostic_report(
     Returns:
         报告文本
     """
+    hit_summary = summarize_hit_rates(results_df)
+
     report_lines = [
         "=" * 60,
         "MCMC Fan Vote Inference - Diagnostic Report",
@@ -409,9 +510,16 @@ def generate_diagnostic_report(
         f"Min: {results_df['acceptance_rate'].min():.3f}",
         f"Max: {results_df['acceptance_rate'].max():.3f}",
         "",
-        "--- Certainty Index ---",
-        f"Mean: {results_df['certainty_index'].mean():.3f}",
-        f"Std: {results_df['certainty_index'].std():.3f}",
+        "--- Hit Rate ---",
+        f"Mean: {hit_summary['mean']:.3f}",
+        f"Std: {hit_summary['std']:.3f}",
+        f"Min: {hit_summary['min']:.3f}",
+        f"Max: {hit_summary['max']:.3f}",
+        f"Weeks counted: {hit_summary['count']}",
+        "",
+        "--- Signal-to-Noise Ratio (SNR = μ/σ) ---",
+        f"Mean: {results_df['snr'].mean():.3f}" if 'snr' in results_df.columns else f"Mean: {results_df['certainty_index'].mean():.3f}",
+        f"Std: {results_df['snr'].std():.3f}" if 'snr' in results_df.columns else f"Std: {results_df['certainty_index'].std():.3f}",
         "",
         "--- 95% CI Width ---",
         f"Mean: {results_df['ci_width'].mean():.4f}",
@@ -424,10 +532,17 @@ def generate_diagnostic_report(
     
     # 保存报告
     report_path = f"{output_dir}/diagnostic_report.txt"
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(report)
-    
-    print(f"诊断报告已保存: {report_path}")
+    try:
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report)
+        print(f"诊断报告已保存: {report_path}")
+    except PermissionError:
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        alt_path = f"{output_dir}/diagnostic_report_{ts}.txt"
+        with open(alt_path, 'w', encoding='utf-8') as f:
+            f.write(report)
+        warnings.warn(f"无法写入文件（可能被占用）: {report_path}，已改写到: {alt_path}")
     
     return report
 

@@ -11,22 +11,29 @@ Converged weeks: 261
 Convergence rate: 100.00%
 
 --- PPC Consistency ---
-Mean: 0.779
-Std: 0.195
-Min: 0.279
+Mean: 0.756
+Std: 0.190
+Min: 0.278
 Max: 1.000
 
 --- Acceptance Rate ---
-Mean: 0.395
-Min: 0.092
-Max: 0.924
+Mean: 0.393
+Min: 0.096
+Max: 0.879
 
---- Certainty Index ---
-Mean: 0.564
-Std: 0.048
+--- Hit Rate ---
+Mean: 1.000
+Std: 0.000
+Min: 1.000
+Max: 1.000
+Weeks counted: 225
+
+--- Signal-to-Noise Ratio (SNR = μ/σ) ---
+Mean: 1.939
+Std: 0.821
 
 --- 95% CI Width ---
-Mean: 0.3873
-Std: 0.1601
+Mean: 0.2832
+Std: 0.0815
 
 ============================================================

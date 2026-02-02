@@ -53,7 +53,18 @@ if %N_JOBS% LSS 1 set "N_JOBS=1"
 echo Running with: -j %N_JOBS%  (override by passing -j N or --no-parallel)
 echo.
 
-"%PYTHON%" q1_mcmc/main.py -j %N_JOBS% %*
+set "EXPORT_ARGS="
+set /p "EXPORT_CHOICE=Enable sample export (.npz)? [y/N]: "
+if /I "%EXPORT_CHOICE%"=="y" (
+    set /p "EXPORT_PATH=Export directory (blank=outputs\q1_mcmc): "
+    if "%EXPORT_PATH%"=="" (
+        set "EXPORT_ARGS=--export-samples"
+    ) else (
+        set "EXPORT_ARGS=--export-samples --samples-dir %EXPORT_PATH%"
+    )
+)
+
+"%PYTHON%" q1_mcmc/main.py -j %N_JOBS% %EXPORT_ARGS% %*
 
 echo.
 echo ============================================================
