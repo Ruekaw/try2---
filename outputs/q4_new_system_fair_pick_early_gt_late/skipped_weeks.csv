@@ -1,0 +1,107 @@
+season,week,reason
+10,1,missing in npz (not exported by Q1)
+10,4,missing in npz (not exported by Q1)
+10,7,missing in npz (not exported by Q1)
+11,7,missing in npz (not exported by Q1)
+12,1,missing in npz (not exported by Q1)
+12,5,missing in npz (not exported by Q1)
+13,2,missing in npz (not exported by Q1)
+14,1,missing in npz (not exported by Q1)
+14,2,missing in npz (not exported by Q1)
+14,10,missing in npz (not exported by Q1)
+14,8,double elimination
+15,1,missing in npz (not exported by Q1)
+15,5,missing in npz (not exported by Q1)
+15,7,missing in npz (not exported by Q1)
+15,9,double elimination
+16,1,missing in npz (not exported by Q1)
+16,4,missing in npz (not exported by Q1)
+16,9,missing in npz (not exported by Q1)
+17,1,missing in npz (not exported by Q1)
+17,6,missing in npz (not exported by Q1)
+17,7,missing in npz (not exported by Q1)
+18,3,missing in npz (not exported by Q1)
+18,4,missing in npz (not exported by Q1)
+18,5,missing in npz (not exported by Q1)
+19,5,missing in npz (not exported by Q1)
+19,7,missing in npz (not exported by Q1)
+19,10,missing in npz (not exported by Q1)
+1,1,missing in npz (not exported by Q1)
+1,4,missing in npz (not exported by Q1)
+20,1,missing in npz (not exported by Q1)
+20,9,missing in npz (not exported by Q1)
+21,1,missing in npz (not exported by Q1)
+21,3,missing in npz (not exported by Q1)
+21,5,missing in npz (not exported by Q1)
+21,10,missing in npz (not exported by Q1)
+21,2,double elimination
+21,9,double elimination
+22,1,missing in npz (not exported by Q1)
+22,3,missing in npz (not exported by Q1)
+22,5,missing in npz (not exported by Q1)
+22,7,double elimination
+22,9,double elimination
+23,1,missing in npz (not exported by Q1)
+23,5,missing in npz (not exported by Q1)
+23,4,double elimination
+24,1,missing in npz (not exported by Q1)
+24,3,missing in npz (not exported by Q1)
+24,7,double elimination
+25,1,missing in npz (not exported by Q1)
+25,3,missing in npz (not exported by Q1)
+25,5,missing in npz (not exported by Q1)
+25,2,double elimination
+26,1,double elimination
+26,2,double elimination
+26,3,double elimination
+27,5,missing in npz (not exported by Q1)
+27,7,double elimination
+28,1,missing in npz (not exported by Q1)
+28,3,missing in npz (not exported by Q1)
+28,5,missing in npz (not exported by Q1)
+28,2,double elimination
+29,1,missing in npz (not exported by Q1)
+29,7,double elimination
+29,10,double elimination
+2,3,missing in npz (not exported by Q1)
+30,1,missing in npz (not exported by Q1)
+30,3,missing in npz (not exported by Q1)
+30,5,missing in npz (not exported by Q1)
+30,4,double elimination
+30,8,double elimination
+30,9,double elimination
+31,6,missing in npz (not exported by Q1)
+31,5,double elimination
+31,8,double elimination
+31,9,double elimination
+32,6,missing in npz (not exported by Q1)
+32,7,missing in npz (not exported by Q1)
+32,9,missing in npz (not exported by Q1)
+32,10,missing in npz (not exported by Q1)
+33,1,missing in npz (not exported by Q1)
+33,8,missing in npz (not exported by Q1)
+33,3,double elimination
+34,1,missing in npz (not exported by Q1)
+34,5,missing in npz (not exported by Q1)
+34,2,double elimination
+3,6,missing in npz (not exported by Q1)
+3,7,missing in npz (not exported by Q1)
+3,5,double elimination
+4,1,missing in npz (not exported by Q1)
+4,2,missing in npz (not exported by Q1)
+4,6,missing in npz (not exported by Q1)
+5,7,missing in npz (not exported by Q1)
+5,8,missing in npz (not exported by Q1)
+5,10,missing in npz (not exported by Q1)
+6,1,missing in npz (not exported by Q1)
+7,3,missing in npz (not exported by Q1)
+7,1,double elimination
+7,2,double elimination
+8,1,missing in npz (not exported by Q1)
+8,6,missing in npz (not exported by Q1)
+8,4,double elimination
+9,9,missing in npz (not exported by Q1)
+9,1,double elimination
+9,3,double elimination
+9,6,double elimination
+9,7,double elimination

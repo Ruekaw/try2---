@@ -249,6 +249,7 @@ def run_search_mode(
     save_list: list[bool],
     max_samples_per_week: int | None,
     seed: int,
+    jobs: int,
 ) -> None:
     loaded = load_q2_data(clean_csv, npz_dir)
     run_grid_search(
@@ -260,6 +261,7 @@ def run_search_mode(
         save_list=save_list,
         max_samples_per_week=max_samples_per_week,
         seed=seed,
+        n_jobs=int(jobs),
     )
 
 
@@ -329,6 +331,12 @@ def main() -> None:
         default=None,
         help="Subsample posterior draws per week for speed (e.g., 1000)",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Parallelism for grid search (threads). Use 1 to disable.",
+    )
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--dpi", type=int, default=cfg.png_dpi)
 
@@ -378,6 +386,7 @@ def main() -> None:
             save_list=save_list,
             max_samples_per_week=args.max_samples_per_week,
             seed=int(args.seed),
+            jobs=int(args.jobs),
         )
 
 

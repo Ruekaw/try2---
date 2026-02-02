@@ -28,7 +28,7 @@ from config import (
     get_violation_lambda
 )
 from sampler import UnifiedMCMCSampler, SamplingResult
-from diagnostics import compute_hit_rate_for_week
+from diagnostics import compute_hit_rate_for_week, compute_diagnostics, diagnose_convergence
 
 
 @dataclass
@@ -218,8 +218,32 @@ def _infer_week_core(
         violation_lambda_override=effective_lambda
     )
 
-    if not result.converged:
-        warnings.warn(f"Season {season} Week {week}: MCMC未收敛")
+    # === 采样质量/收敛诊断 ===
+    # sampler.sample() 当前只要跑完就会返回 converged=True（除非初始化失败）。
+    # 这里用 ESS + 接受率 做真实的“likely_converged”判定，并把 WeekResult.converged 写成该判定。
+    week_converged = bool(result.converged)
+    if week_converged:
+        try:
+            # 为避免 ESS 计算在全量样本上过慢，限制诊断样本点数（最多约2000点）。
+            diag_max_points = 2000
+            stride = max(1, int(np.ceil(result.samples.shape[0] / diag_max_points)))
+            diag_samples = result.samples[::stride]
+
+            diag = compute_diagnostics(diag_samples, acceptance_rate=result.acceptance_rate)
+            conv = diagnose_convergence(
+                diag.ess,
+                acceptance_rate=result.acceptance_rate,
+                n_samples=int(diag_samples.shape[0]),
+                ess_threshold=100,
+                accept_range=(0.1, 0.8)
+            )
+            week_converged = bool(conv.get('likely_converged', False))
+        except Exception as e:
+            # 诊断失败不应打断推断；保留 sampler 的状态并告警。
+            warnings.warn(f"Season {season} Week {week}: 收敛诊断失败: {e}")
+
+    if not week_converged:
+        warnings.warn(f"Season {season} Week {week}: MCMC采样质量不足（converged=False）")
 
     samples = result.samples
     mean_votes = np.mean(samples, axis=0)
@@ -273,7 +297,7 @@ def _infer_week_core(
         hit_rate=hit_rate,
         elimination_count=elimination_count,
         acceptance_rate=result.acceptance_rate,
-        converged=result.converged,
+        converged=week_converged,
         init_attempts=result.init_attempts
     )
 

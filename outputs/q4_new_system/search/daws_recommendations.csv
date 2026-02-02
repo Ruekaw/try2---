@@ -1,0 +1,4 @@
+objective,method,w_early,w_late,n_cut,save_enabled,reversal_rate,tech_vulnerability,popularity_vulnerability,n_weeks,n_samples_per_week
+fairness,daws_save,0.4,0.0,6,True,0.4259020512820513,0.002815228426395939,0.06675228426395939,197,10000
+audience,daws_direct,0.8,0.4,4,False,0.49185435897435903,0.1122289340101523,0.0014446700507614214,197,10000
+balanced,daws_save,0.4,0.4,4,True,0.3674220512820513,0.004354314720812183,0.014272081218274111,197,10000
